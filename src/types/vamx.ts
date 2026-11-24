@@ -141,17 +141,140 @@ export interface AutomationConfig {
   defaultTemplateId: string;
 }
 
+export type InterpRoleView =
+  | 'host'
+  | 'speaker'
+  | 'interpreter'
+  | 'standby'
+  | 'audience';
+
+export type InterpLifecycleStatus =
+  | 'upcoming'
+  | 'live'
+  | 'paused'
+  | 'reviewable'
+  | 'published';
+
+export type InterpArchiveStatus =
+  | 'reviewable'
+  | 'processing'
+  | 'completed'
+  | 'published';
+
+export type InterpAccessPolicy =
+  | 'public'
+  | 'org_only'
+  | 'allowlist'
+  | 'restricted';
+
+export interface StandbyInterpreter {
+  id: string;
+  name: string;
+  langs: string;
+  device: string;
+  network: string;
+  latencyMs: number;
+  online: boolean;
+}
+
+export interface InterpUtterance {
+  id: string;
+  time: string;
+  seconds: number;
+  speakerName: string;
+  interpreterName: string;
+  sourceText: string;
+  translatedText: string;
+  translationStatus: 'confirmed' | 'draft' | 'retranslating' | 'failed';
+  terminologyMatched?: string[];
+  isGap?: boolean;
+  gapReason?: string;
+  gapResolved?: boolean;
+}
+
+export interface InterpTrackSegment {
+  id: string;
+  startSec: number;
+  endSec: number;
+  label: string;
+  isGap?: boolean;
+  gapReason?: string;
+  resolved?: boolean;
+}
+
+export interface InterpMinutesActionItem {
+  id: string;
+  task: string;
+  owner: string;
+  deadline: string;
+  sourceTimestamp: string;
+}
+
+export interface InterpMinutesData {
+  summary: string;
+  topics: string[];
+  topicAnalyses: Array<{ topic: string; analysis: string }>;
+  keyConclusions: Array<{ id: string; text: string; timestamp: string }>;
+  actionItems: InterpMinutesActionItem[];
+  risksAndOpenQuestions: string[];
+  reviewedConfirmed: boolean;
+  publishedLocked: boolean;
+  generatedAt: string;
+}
+
+export interface InterpAuditLog {
+  id: string;
+  time: string;
+  actor: string;
+  action: string;
+  detail: string;
+}
+
 export interface InterpretationRoom {
   id: string;
   title: string;
   sourceLang: string;
   targetLang: string;
   status: 'live' | 'upcoming' | 'paused' | 'ended';
+  lifecycle?: InterpLifecycleStatus;
+  archiveStatus?: InterpArchiveStatus;
+  orgId?: string;
   listenerCount: number;
+  maxSeats?: number;
   inviteCode: string;
   createdByMe: boolean;
   createdAt: string;
+  startedAt?: string;
+  endedAt?: string;
   trashed?: boolean;
+  trashedAt?: string;
+  retentionDaysLeft?: number;
+  routeId?: 'route-asean' | 'route-global';
+  routeLabel?: string;
+  accessPolicy?: InterpAccessPolicy;
+  glossaryHints?: string[];
+  audienceCaptionsEnabled?: boolean;
+  entryOpen?: boolean;
+  removedGuests?: string[];
+  notes?: string;
+  speakerName?: string;
+  leadInterpreterId?: string;
+  leadInterpreterName?: string;
+  standbyInterpreters?: StandbyInterpreter[];
+  aiAssistEnabled?: boolean;
+  preflight?: {
+    micChecked: boolean;
+    dualToneChecked: boolean;
+    rtcChecked: boolean;
+  };
+  durationSec?: number;
+  handoverAtSec?: number;
+  handoverNote?: string;
+  utterances?: InterpUtterance[];
+  originalSegments?: InterpTrackSegment[];
+  interpretedSegments?: InterpTrackSegment[];
+  minutes?: InterpMinutesData;
+  auditLogs?: InterpAuditLog[];
 }
 
 export interface TranslationBlock {

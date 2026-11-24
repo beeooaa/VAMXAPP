@@ -12,6 +12,7 @@ import {
   TranslationBlock,
   UserProfileState,
 } from '../types/vamx';
+import { createRichInitialRooms } from './interpretationData';
 
 export const INITIAL_USER_PROFILE: UserProfileState = {
   userName: 'M',
@@ -490,52 +491,7 @@ export const INITIAL_RECORDINGS: RecordingItem[] = [
   },
 ];
 
-export const INITIAL_ROOMS: InterpretationRoom[] = [
-  {
-    id: 'room-1',
-    title: '测试',
-    sourceLang: '中文',
-    targetLang: '英语',
-    status: 'ended',
-    listenerCount: 0,
-    inviteCode: 'VX-8492',
-    createdByMe: true,
-    createdAt: '2026-11-20 18:20',
-  },
-  {
-    id: 'room-2',
-    title: '114测试',
-    sourceLang: '中文',
-    targetLang: '英语',
-    status: 'ended',
-    listenerCount: 0,
-    inviteCode: 'VX-1140',
-    createdByMe: true,
-    createdAt: '2026-11-19 14:10',
-  },
-  {
-    id: 'room-3',
-    title: '跨境供应链同步会',
-    sourceLang: '中文',
-    targetLang: '越南语',
-    status: 'live',
-    listenerCount: 12,
-    inviteCode: 'VX-3905',
-    createdByMe: true,
-    createdAt: '2026-11-20 23:10',
-  },
-  {
-    id: 'room-4',
-    title: 'Q4 产品发布会彩排',
-    sourceLang: '英语',
-    targetLang: '简体中文',
-    status: 'upcoming',
-    listenerCount: 0,
-    inviteCode: 'VX-6621',
-    createdByMe: false,
-    createdAt: '2026-11-21 09:30',
-  },
-];
+export const INITIAL_ROOMS: InterpretationRoom[] = createRichInitialRooms();
 
 export const INITIAL_TRANSFERS: TransferTask[] = [
   { id: 'tf-1', filename: '20261027113338.mp3', sizeLabel: '311 KB', progress: 100, status: 'completed' },

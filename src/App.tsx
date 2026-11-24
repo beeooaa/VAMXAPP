@@ -72,6 +72,8 @@ import { RecordingDetailView, RecordingSeekTarget } from './components/Recording
 import { LiveRecordSheet } from './components/LiveRecordSheet';
 import { RealTimeTranslationView } from './components/RealTimeTranslationView';
 import { InterpretationRoomView } from './components/InterpretationRoomView';
+import { AudienceView } from './components/interpretation/AudienceView';
+import { createAuditEntry, normalizeInterpretationRoom } from './data/interpretationData';
 import { AiWorkbenchView } from './components/AiWorkbenchView';
 import { ProfileSettingsView, ProfileSheetType } from './components/ProfileSettingsView';
 import { ImportFilesSheet, ImportSheetMode } from './components/ImportFilesSheet';
@@ -187,7 +189,27 @@ export default function App() {
   const [recordings, setRecordings] = useState<RecordingItem[]>(
     persisted.recordings ?? INITIAL_RECORDINGS
   );
-  const [rooms, setRooms] = useState<InterpretationRoom[]>(persisted.rooms ?? INITIAL_ROOMS);
+  const [guestJoinParams, setGuestJoinParams] = useState<{
+    code: string;
+    roomId: string;
+  } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('join');
+    if (!code) return null;
+    return { code, roomId: params.get('room') || '' };
+  });
+
+  const [rooms, setRooms] = useState<InterpretationRoom[]>(() => {
+    const saved = persisted.rooms;
+    if (!saved || saved.length === 0) return INITIAL_ROOMS;
+    const hasRich = saved.some((r) => r.id === 'room-live-demo' || r.id === 'room-arch-1');
+    if (hasRich) return saved.map(normalizeInterpretationRoom);
+    const legacyCustom = saved.filter(
+      (r) => !['room-1', 'room-2', 'room-3', 'room-4'].includes(r.id)
+    );
+    return [...legacyCustom, ...INITIAL_ROOMS].map(normalizeInterpretationRoom);
+  });
   const [transfers, setTransfers] = useState<TransferTask[]>(
     persisted.transfers ?? INITIAL_TRANSFERS
   );
@@ -480,6 +502,54 @@ export default function App() {
     aiMessages,
     authStatus,
   ]);
+
+  // Cross-tab real-time BroadcastChannel & storage sync for Interpretation Rooms
+  const syncChannelRef = useRef<BroadcastChannel | null>(null);
+  const skipBroadcastRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if ('BroadcastChannel' in window) {
+      const ch = new BroadcastChannel('vamx_interp_sync_v1');
+      syncChannelRef.current = ch;
+      ch.onmessage = (ev) => {
+        if (ev.data?.type === 'ROOMS_SYNC' && Array.isArray(ev.data.rooms)) {
+          skipBroadcastRef.current = true;
+          setRooms(ev.data.rooms.map(normalizeInterpretationRoom));
+        }
+      };
+    }
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY && e.newValue) {
+        try {
+          const next = JSON.parse(e.newValue) as PersistedAppState;
+          if (Array.isArray(next.rooms)) {
+            skipBroadcastRef.current = true;
+            setRooms(next.rooms.map(normalizeInterpretationRoom));
+          }
+        } catch {
+          // Ignore malformed JSON
+        }
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      syncChannelRef.current?.close();
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (skipBroadcastRef.current) {
+      skipBroadcastRef.current = false;
+      return;
+    }
+    try {
+      syncChannelRef.current?.postMessage({ type: 'ROOMS_SYNC', rooms });
+    } catch {
+      // Ignore closed channel
+    }
+  }, [rooms]);
 
   // Live recording timer
   useEffect(() => {
@@ -1195,9 +1265,50 @@ export default function App() {
 
   const isRootTab = activeTab === 'files' || activeTab === 'toolbox';
   const isMobileFullPush =
-    showLiveTranslate || (!desktopMode && activeTab === 'files' && mobileDetailOpen);
+    showLiveTranslate ||
+    (!desktopMode && activeTab === 'files' && mobileDetailOpen) ||
+    (!desktopMode && activeTab === 'rooms');
   const isSubPagePush = !desktopMode && !showLiveTranslate && !isRootTab;
   const showMobileBottomDock = !isMobileFullPush && isRootTab;
+
+  if (guestJoinParams) {
+    return (
+      <AudienceView
+        mode="external_guest"
+        rooms={rooms.map(normalizeInterpretationRoom)}
+        initialInviteCode={guestJoinParams.code}
+        initialRoomId={guestJoinParams.roomId}
+        language={language}
+        onChangeLanguage={setLanguage}
+        onLogConsent={(roomId, guestLabel) => {
+          setRooms((prev) =>
+            prev.map((r) =>
+              r.id === roomId
+                ? {
+                    ...r,
+                    listenerCount: r.listenerCount + 1,
+                    auditLogs: [
+                      createAuditEntry(guestLabel, '录制告知确认', '已勾选录制知情并进入收听席位'),
+                      ...(r.auditLogs || []),
+                    ],
+                  }
+                : r
+            )
+          );
+        }}
+        onExitGuest={() => {
+          setGuestJoinParams(null);
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('join');
+            url.searchParams.delete('room');
+            window.history.replaceState({}, '', url.toString());
+          }
+        }}
+        onNotify={notify}
+      />
+    );
+  }
 
   return (
     <div
@@ -1534,9 +1645,11 @@ export default function App() {
         <main
           className={
             desktopMode
-              ? 'flex-1 min-w-0 pb-20 lg:pb-8 px-4 sm:px-6 lg:px-8 py-5 lg:py-6 max-w-7xl w-full mx-auto'
-              : isMobileFullPush || activeTab === 'ai'
-              ? 'flex-1 min-h-0 flex flex-col overflow-hidden'
+              ? `flex-1 min-w-0 pb-20 lg:pb-8 px-4 sm:px-6 lg:px-8 py-5 lg:py-6 w-full mx-auto ${
+                  activeTab === 'rooms' ? 'max-w-[1440px]' : 'max-w-7xl'
+                }`
+              : isMobileFullPush || activeTab === 'ai' || activeTab === 'rooms'
+              ? `flex-1 min-h-0 flex flex-col overflow-hidden ${activeTab === 'rooms' ? 'bg-[#F5F7FB]' : ''}`
               : activeTab === 'toolbox'
               ? 'flex-1 min-h-0 overflow-y-auto no-scrollbar bg-[#F5F8FD] px-4 pt-2 pb-10'
               : 'flex-1 min-h-0 overflow-y-auto no-scrollbar bg-white px-5 pt-1 pb-10'
@@ -2256,11 +2369,28 @@ export default function App() {
                 <InterpretationRoomView
                   rooms={rooms}
                   language={language}
+                  desktopMode={desktopMode}
+                  onBack={() => setActiveTab(prevRootTab)}
+                  onChangeLanguage={setLanguage}
+                  onRequestDesktopMode={() => setDesktopMode(true)}
+                  onNavigateToAssistant={() => setActiveTab('files')}
                   onCreateRoom={(room) => setRooms((prev) => [room, ...prev])}
                   onUpdateRoom={(room) =>
                     setRooms((prev) => prev.map((r) => (r.id === room.id ? room : r)))
                   }
+                  onDeleteRoomPermanent={(roomId) =>
+                    setRooms((prev) => prev.filter((r) => r.id !== roomId))
+                  }
                   onEnterLiveTranslate={openLiveTranslate}
+                  onOpenGuestLanding={(room) => {
+                    if (typeof window !== 'undefined') {
+                      const url = new URL(window.location.href);
+                      url.searchParams.set('join', room.inviteCode);
+                      url.searchParams.set('room', room.id);
+                      window.history.replaceState({}, '', url.toString());
+                    }
+                    setGuestJoinParams({ code: room.inviteCode, roomId: room.id });
+                  }}
                   onNotify={notify}
                 />
               )}
