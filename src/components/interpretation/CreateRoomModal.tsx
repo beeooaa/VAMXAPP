@@ -169,7 +169,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             <select
               value={pairId}
               onChange={(e) => setPairId(e.target.value)}
-              className="w-full h-11 px-3.5 rounded-xl border border-[#DCE3EE] text-sm text-[#111827] bg-white focus:outline-none focus:border-[#1668FF]"
+              className="vamx-select vamx-select--lg w-full"
             >
               {INTERP_LANG_PAIRS.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -199,7 +199,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
                   <select
                     value={routeId}
                     onChange={(e) => setRouteId(e.target.value as 'route-asean' | 'route-global')}
-                    className="w-full h-10 px-3 rounded-xl border border-[#DCE3EE] text-xs text-[#111827] bg-white focus:outline-none focus:border-[#1668FF]"
+                    className="vamx-select w-full"
                   >
                     {INTERP_ROUTES.map((r) => (
                       <option key={r.id} value={r.id}>
@@ -215,7 +215,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
                   <select
                     value={accessPolicy}
                     onChange={(e) => setAccessPolicy(e.target.value as InterpAccessPolicy)}
-                    className="w-full h-10 px-3 rounded-xl border border-[#DCE3EE] text-xs text-[#111827] bg-white focus:outline-none focus:border-[#1668FF]"
+                    className="vamx-select w-full"
                   >
                     {(['public', 'org_only', 'allowlist', 'restricted'] as InterpAccessPolicy[]).map(
                       (pol) => (

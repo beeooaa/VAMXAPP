@@ -158,7 +158,7 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
       </div>
 
       {/* Tactile Secondary Controls (>= 44px touch targets) */}
-      <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-[#F0F3F8]">
+      <div className="flex items-center justify-center gap-3 pt-2.5 mt-2.5 border-t border-[#F0F3F8]">
         <button
           type="button"
           onClick={onCycleRate}

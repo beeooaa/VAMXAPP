@@ -59,6 +59,7 @@ interface RecordingDetailViewProps {
   language?: AppLanguage;
   recording: RecordingItem;
   templates: SummaryTemplate[];
+  defaultTemplateId: string;
   folders?: FolderItem[];
   seekTarget?: RecordingSeekTarget | null;
   onBack?: () => void;
@@ -71,6 +72,7 @@ export const RecordingDetailView: React.FC<RecordingDetailViewProps> = ({
   language = 'zh',
   recording,
   templates,
+  defaultTemplateId,
   folders = [],
   seekTarget,
   onBack,
@@ -96,7 +98,7 @@ export const RecordingDetailView: React.FC<RecordingDetailViewProps> = ({
   const [titleDraft, setTitleDraft] = useState(recording.title);
 
   const [selectedTemplateId, setSelectedTemplateId] = useState(
-    recording.summary?.templateId || templates[0]?.id || 'meeting'
+    recording.summary?.templateId || defaultTemplateId || templates[0]?.id || 'meeting'
   );
   const [summaryLang, setSummaryLang] = useState(
     recording.summary?.language || SUMMARY_LANGUAGES[0]
@@ -166,15 +168,13 @@ export const RecordingDetailView: React.FC<RecordingDetailViewProps> = ({
     setStreamingQaId(null);
     setIsGeneratingSummary(false);
     setSummaryRevealChars(null);
+    setSelectedTemplateId(recording.summary?.templateId || defaultTemplateId || templates[0]?.id || 'meeting');
+    setSummaryLang(recording.summary?.language || SUMMARY_LANGUAGES[0]);
     setIsGeneratingMindMap(false);
     setIsGeneratingTranscript(false);
     setAttachRecordingContext(true);
     setShowStickyMiniPlayer(false);
     scrollContainerRef.current?.scrollTo({ top: 0 });
-    if (recording.summary) {
-      setSelectedTemplateId(recording.summary.templateId);
-      setSummaryLang(recording.summary.language);
-    }
   }, [recording.id]);
 
   // Handle explicit jump-to-timestamp requests (e.g. from Ask VAMX citation)
@@ -297,10 +297,11 @@ export const RecordingDetailView: React.FC<RecordingDetailViewProps> = ({
     setEditingTitle(false);
   };
 
-  const handleGenerateSummary = (tplId = selectedTemplateId) => {
+  const handleGenerateSummary = () => {
     clearAllGenerationTimers();
-    const tpl = templates.find((t) => t.id === tplId) || templates[0];
+    const tpl = templates.find((t) => t.id === selectedTemplateId) || templates[0];
     const tplDisplay = getTemplateDisplay(tpl, language).name;
+    const templateChanged = recording.summary?.templateId !== tpl.id;
     const reduced =
       typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -329,7 +330,7 @@ export const RecordingDetailView: React.FC<RecordingDetailViewProps> = ({
           language: summaryLang,
           overview: overviewBase,
           keyPoints:
-            recording.summary?.keyPoints.length
+            !templateChanged && recording.summary?.keyPoints.length
               ? recording.summary.keyPoints
               : [s.autoSummaryKp1(tplDisplay), s.autoSummaryKp2],
           decisions: recording.summary?.decisions.length
@@ -1246,57 +1247,46 @@ export const RecordingDetailView: React.FC<RecordingDetailViewProps> = ({
           {/* 1. SUMMARY TAB */}
           {activeTab === 'summary' && (
             <div className="space-y-5">
-              {/* Template & Language Controls */}
-              <div className="flex items-center gap-1.5 flex-nowrap">
-                <select
-                  aria-label={s.summaryTemplateSelectAria}
-                  value={selectedTemplateId}
-                  onChange={(e) => {
-                    setSelectedTemplateId(e.target.value);
-                    if (recording.summary) {
-                      handleGenerateSummary(e.target.value);
-                    }
-                  }}
-                  className="flex-1 min-w-0 h-8 px-2.5 rounded-lg bg-[#F4F7FC] hover:bg-[#EAF0FA] text-xs font-medium text-[#111827] border border-[#E5ECF5] focus:outline-none cursor-pointer truncate"
-                >
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {s.templatePrefix}{getTemplateDisplay(t, language).name}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  aria-label={s.summaryLangSelectAria}
-                  value={summaryLang}
-                  onChange={(e) => setSummaryLang(e.target.value)}
-                  className="w-[104px] shrink-0 h-8 px-2 rounded-lg bg-[#F4F7FC] hover:bg-[#EAF0FA] text-xs font-medium text-[#475569] border border-[#E5ECF5] focus:outline-none cursor-pointer truncate"
-                >
-                  {SUMMARY_LANGUAGES.map((lang) => (
-                    <option key={lang} value={lang}>
-                      {getLanguageOptionLabel(lang, language)}
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  type="button"
-                  onClick={() => handleGenerateSummary(selectedTemplateId)}
-                  disabled={isGeneratingSummary}
-                  className="h-8 px-3 rounded-lg bg-[#1668FF] text-white text-xs font-semibold hover:bg-[#0D59EB] active:scale-95 transition-all flex items-center gap-1 shrink-0 whitespace-nowrap cursor-pointer disabled:opacity-60 shadow-[0_4px_12px_-4px_rgba(22,104,255,0.4)]"
-                >
-                  <Sparkles
-                    className={`w-3.5 h-3.5 shrink-0 ${isGeneratingSummary ? 'animate-spin' : ''}`}
-                  />
-                  <span>
-                    {isGeneratingSummary
-                      ? s.generatingBtn
-                      : recording.summary
-                      ? s.regenerateBtn
-                      : s.generateSummaryBtn}
-                  </span>
-                </button>
-              </div>
+              {!isGeneratingSummary && (
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <select
+                    aria-label={s.summaryTemplateSelectAria}
+                    title={s.summaryTemplateSelectAria}
+                    value={selectedTemplateId}
+                    onChange={(event) => setSelectedTemplateId(event.target.value)}
+                    className="vamx-select vamx-select--soft vamx-select--sm flex-1 min-w-0"
+                  >
+                    {templates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {getTemplateDisplay(template, language).name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label={s.summaryLangSelectAria}
+                    title={getLanguageOptionLabel(summaryLang, language)}
+                    value={summaryLang}
+                    onChange={(event) => setSummaryLang(event.target.value)}
+                    className="vamx-select vamx-select--soft vamx-select--sm w-[100px] shrink-0"
+                  >
+                    {SUMMARY_LANGUAGES.map((lang) => (
+                      <option key={lang} value={lang}>
+                        {lang === SUMMARY_LANGUAGES[0] ? s.summaryAutoLanguageLabel : getLanguageOptionLabel(lang, language)}
+                      </option>
+                    ))}
+                  </select>
+                  {recording.summary && (
+                      <button
+                        type="button"
+                        onClick={handleGenerateSummary}
+                        className="h-9 px-2.5 rounded-lg bg-[#1668FF] text-white text-xs font-semibold hover:bg-[#0D59EB] active:scale-95 transition-all inline-flex items-center gap-1 shrink-0 cursor-pointer shadow-[0_4px_12px_-4px_rgba(22,104,255,0.4)]"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                        {s.regenerateBtn}
+                      </button>
+                  )}
+                </div>
+              )}
 
               {isGeneratingSummary ? (
                 <div className="space-y-5 pt-1 animate-vamx-rise" aria-live="polite">
@@ -1493,7 +1483,7 @@ export const RecordingDetailView: React.FC<RecordingDetailViewProps> = ({
                   </p>
                   <button
                     type="button"
-                    onClick={() => handleGenerateSummary(selectedTemplateId)}
+                    onClick={handleGenerateSummary}
                     className="h-10 px-5 rounded-xl bg-[#1668FF] text-white text-xs font-semibold hover:bg-[#0D59EB] active:scale-95 transition-all cursor-pointer shadow-[0_4px_12px_-4px_rgba(22,104,255,0.4)]"
                   >
                     {s.generateSummaryBtn}
@@ -1536,12 +1526,16 @@ export const RecordingDetailView: React.FC<RecordingDetailViewProps> = ({
                   </div>
                 </div>
               ) : recording.transcript.length === 0 ? (
-                <div className="py-12 text-center">
-                  <p className="text-sm text-[#64748B] mb-3">{s.emptyTranscriptTitle}</p>
+                <div className="py-12 flex flex-col items-center text-center">
+                  <div className="w-12 h-12 rounded-2xl bg-[#EEF3FF] flex items-center justify-center text-[#1668FF] mb-3">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <p className="text-sm font-medium text-[#111827]">{s.emptyTranscriptTitle}</p>
+                  <p className="text-xs text-[#64748B] mt-1 mb-4">{s.emptyTranscriptDesc}</p>
                   <button
                     type="button"
                     onClick={handleGenerateTranscript}
-                    className="h-9 px-4 rounded-xl bg-[#1668FF] hover:bg-[#0D59EB] text-white text-xs font-semibold cursor-pointer shadow-[0_4px_12px_-4px_rgba(22,104,255,0.35)]"
+                    className="h-10 px-5 rounded-xl bg-[#1668FF] hover:bg-[#0D59EB] text-white text-xs font-semibold active:scale-95 transition-all cursor-pointer shadow-[0_4px_12px_-4px_rgba(22,104,255,0.4)]"
                   >
                     {s.startTranscribeBtn}
                   </button>
@@ -2014,7 +2008,7 @@ export const RecordingDetailView: React.FC<RecordingDetailViewProps> = ({
                         const fName = nextId === 'all' ? c.unfiled : getFolderDisplayName(fObj, language);
                         onNotify(s.toastMovedFolder(fName));
                       }}
-                      className="text-xs font-medium text-[#1668FF] bg-transparent focus:outline-none cursor-pointer text-right"
+                      className="vamx-select vamx-select--sm vamx-select--inline max-w-[58%] text-right"
                     >
                       {folders.map((f) => (
                         <option key={f.id} value={f.id}>

@@ -337,7 +337,7 @@ export const AudienceView: React.FC<AudienceViewProps> = ({
               <select
                 value={language}
                 onChange={(e) => onChangeLanguage(e.target.value as AppLanguage)}
-                className="h-8 px-2 rounded-lg border border-[#DCE3EE] text-xs bg-white text-[#111827]"
+                className="vamx-select vamx-select--xs"
               >
                 <option value="zh">中文</option>
                 <option value="en">EN</option>

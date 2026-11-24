@@ -8,11 +8,12 @@ import {
   Download,
   FileText,
   Headphones,
-  Lock,
+  MoreHorizontal,
   Pause,
   Play,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Volume2,
@@ -36,6 +37,8 @@ import {
   INTERP_COPY,
 } from '../../data/interpretationData';
 import { getLanguageOptionLabel } from '../../data/uiStrings';
+import { archiveWorkflow, areAllUtterancesConfirmed, isBlockedUtterance, isMissingMinutesField, validText } from '../../data/archiveWorkflow';
+import { MinutesReader } from './MinutesReader';
 
 interface ArchiveWorkspaceProps {
   rooms: InterpretationRoom[];
@@ -89,6 +92,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
   const [statusFilter, setStatusFilter] = useState<'all' | InterpArchiveStatus>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | '7d' | 'month'>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
 
   const [detailTab, setDetailTab] = useState<'playback' | 'transcript' | 'minutes'>('playback');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -100,10 +104,19 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
   const [utteranceFilter, setUtteranceFilter] = useState<'all' | 'anomalies'>('all');
   const [editingUttId, setEditingUttId] = useState<string | null>(null);
   const [editingUttDraft, setEditingUttDraft] = useState('');
+  const [manualSource, setManualSource] = useState('');
+  const [manualTranslation, setManualTranslation] = useState('');
 
   const [generatingRoomId, setGeneratingRoomId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const roomsRef = useRef(rooms);
+  roomsRef.current = rooms;
   const isGeneratingMinutes = generatingRoomId !== null;
   const [newTopicText, setNewTopicText] = useState('');
+  const [editingMinutes, setEditingMinutes] = useState(false);
+  const [confirmPendingArchive, setConfirmPendingArchive] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [focusMissingField, setFocusMissingField] = useState(false);
   const [permDeleteTarget, setPermDeleteTarget] = useState<InterpretationRoom | null>(null);
 
   const timerRef = useRef<number | null>(null);
@@ -123,8 +136,11 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
     const list = archivedRooms.filter((r) => {
       const archStatus = getArchiveStatus(r, generatingRoomId === r.id);
       if (statusFilter !== 'all' && archStatus !== statusFilter) return false;
-      if (dateFilter === 'today' && !r.createdAt.startsWith('2026-11-24')) return false;
-      if (dateFilter === '7d' && r.createdAt < '2026-11-17') return false;
+      const today = new Date();
+      const date = new Date(r.endedAt || r.createdAt);
+      if (dateFilter === 'today' && date.toDateString() !== today.toDateString()) return false;
+      if (dateFilter === '7d' && date.getTime() < new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6).getTime()) return false;
+      if (dateFilter === 'month' && (date.getMonth() !== today.getMonth() || date.getFullYear() !== today.getFullYear())) return false;
       if (q) {
         const hitTitle = r.title.toLowerCase().includes(q);
         const hitUtt = (r.utterances || []).some(
@@ -155,11 +171,34 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
   }, [filteredList, selectedArchiveId]);
 
   const duration = Math.max(10, selectedRoom?.durationSec ?? 60);
+  const workflow = selectedRoom ? archiveWorkflow(selectedRoom) : null;
+  const anomalyUtteranceCount = (selectedRoom?.utterances || []).filter(
+    u => u.translationStatus !== 'confirmed' || isBlockedUtterance(u)
+  ).length;
+  useEffect(() => {
+    if (detailTab !== 'minutes' || !focusMissingField) return;
+    const input = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[data-review-missing="true"]')].find(el => el.getClientRects().length > 0);
+    input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    input?.focus({ preventScroll: true });
+    setFocusMissingField(false);
+  }, [detailTab, focusMissingField, selectedRoom?.id]);
+  const busy = generatingRoomId === selectedRoom?.id || retryingId !== null;
+  const invalidateText = (room: InterpretationRoom): InterpretationRoom => ({
+    ...room, transcriptReviewed: false, archiveStatus: 'reviewable', minutesError: undefined,
+    minutes: room.minutes ? { ...room.minutes, reviewedConfirmed: false, stale: true } : undefined,
+  });
 
   useEffect(() => {
     setIsPlaying(false);
     setPlayTimeSec(0);
     setEditingUttId(null);
+    setUtteranceFilter('all');
+    setManualSource('');
+    setManualTranslation('');
+    setEditingMinutes(false);
+    setConfirmPendingArchive(false);
+    setShowHistory(false);
+    setDetailTab('minutes');
   }, [selectedRoom?.id]);
 
   useEffect(() => {
@@ -213,7 +252,8 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
   };
 
   const handleSaveUttEdit = (uttId: string) => {
-    if (!selectedRoom) return;
+    if (!selectedRoom || workflow?.locked || busy) return;
+    if (!validText(editingUttDraft)) { onNotify('请填写有效译文，错误提示不能作为译文保存。'); return; }
     const nextUtterances = (selectedRoom.utterances || []).map((u) =>
       u.id === uttId
         ? {
@@ -224,29 +264,28 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
           }
         : u
     );
-    const currentArch = getArchiveStatus(selectedRoom);
+    const textConfirmed = areAllUtterancesConfirmed(nextUtterances);
     onUpdateRoom({
-      ...selectedRoom,
-      archiveStatus: currentArch === 'reviewable' ? 'processing' : selectedRoom.archiveStatus,
+      ...invalidateText(selectedRoom),
       utterances: nextUtterances,
+      transcriptReviewed: textConfirmed,
       auditLogs: [
-        createAuditEntry(actorName, '校对译文', `更新段落 ${uttId} 并标记已确认`),
+        createAuditEntry(actorName, textConfirmed ? '校对译文并确认文本' : '校对译文', `更新段落 ${uttId}${textConfirmed ? '，全部段落已确认' : ''}`),
         ...(selectedRoom.auditLogs || []),
       ],
     });
     setEditingUttId(null);
-    onNotify(c.saveEditBtn);
+    onNotify(textConfirmed ? c.textConfirmedBadge : c.saveEditBtn);
   };
 
   const handleResolveGapSegment = (segId: string) => {
-    if (!selectedRoom) return;
-    const currentArch = getArchiveStatus(selectedRoom);
+    if (!selectedRoom || workflow?.locked || busy) return;
     onUpdateRoom({
       ...selectedRoom,
-      archiveStatus: currentArch === 'reviewable' ? 'processing' : selectedRoom.archiveStatus,
       interpretedSegments: (selectedRoom.interpretedSegments || []).map((s) =>
         s.id === segId ? { ...s, resolved: true } : s
       ),
+      originalSegments: (selectedRoom.originalSegments || []).map((s) => s.id === segId ? { ...s, resolved: true } : s),
       auditLogs: [
         createAuditEntry(actorName, '处理音频缺段', `标记分段 ${segId} 已解决`),
         ...(selectedRoom.auditLogs || []),
@@ -256,10 +295,11 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
   };
 
   const handleConfirmTranscriptAll = () => {
-    if (!selectedRoom) return;
+    if (!selectedRoom || workflow?.locked || busy || !workflow?.textReady || workflow.noTranscript) return;
     const hasMinutes = Boolean(selectedRoom.minutes);
     onUpdateRoom({
       ...selectedRoom,
+      transcriptReviewed: true,
       archiveStatus: hasMinutes
         ? selectedRoom.minutes?.reviewedConfirmed
           ? 'completed'
@@ -278,7 +318,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
   };
 
   const handleGenerateMinutes = async () => {
-    if (!selectedRoom || generatingRoomId) return;
+    if (!selectedRoom || generatingRoomId || workflow?.locked || !workflow?.textReviewed || workflow.noTranscript || busy) return;
     const targetRoom = selectedRoom;
     setGeneratingRoomId(targetRoom.id);
     try {
@@ -307,6 +347,8 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
       };
 
       const minutes: InterpMinutesData = {
+        version: (targetRoom.minutes?.version || (targetRoom.minutes ? 1 : 0)) + 1,
+        stale: false,
         summary: data.summary || '',
         topics: data.topics || [],
         topicAnalyses: data.topicAnalyses || [],
@@ -328,9 +370,14 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
         generatedAt: new Date().toLocaleTimeString(),
       };
 
+      if (!validText(minutes.summary)) throw new Error('未生成有效摘要，请重试或手动填写纪要。');
+      const latest = roomsRef.current.find(r => r.id === targetRoom.id);
+      if (!latest || latest.trashed || archiveWorkflow(latest).locked || JSON.stringify(latest.utterances) !== JSON.stringify(targetRoom.utterances)) return;
       onUpdateRoom({
-        ...targetRoom,
-        archiveStatus: 'processing',
+        ...latest,
+        minutesHistory: targetRoom.minutes ? [...(latest.minutesHistory || []), targetRoom.minutes] : latest.minutesHistory,
+        minutesError: undefined,
+        archiveStatus: 'reviewable',
         minutes,
         auditLogs: [
           createAuditEntry(actorName, '生成会议纪要', '已调用 AI 接口生成结构化纪要'),
@@ -339,6 +386,8 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
       });
       onNotify(c.tabMinutes);
     } catch (err) {
+      const latest = roomsRef.current.find(r => r.id === targetRoom.id);
+      if (latest && !archiveWorkflow(latest).locked && !latest.trashed) onUpdateRoom({ ...latest, minutesError: err instanceof Error ? err.message : '生成失败，请重试' });
       onNotify(err instanceof Error ? err.message : 'Failed to generate minutes');
     } finally {
       setGeneratingRoomId(null);
@@ -346,39 +395,83 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
   };
 
   const updateMinutes = (patch: Partial<InterpMinutesData>, nextArchiveStatus?: InterpArchiveStatus) => {
-    if (!selectedRoom?.minutes || selectedRoom.minutes.publishedLocked) return;
+    setConfirmPendingArchive(false);
+    if (!selectedRoom?.minutes || workflow?.locked || busy) return;
+    if (patch.reviewedConfirmed && !workflow?.canReview) return;
     onUpdateRoom({
       ...selectedRoom,
-      archiveStatus: nextArchiveStatus ?? selectedRoom.archiveStatus,
-      minutes: { ...selectedRoom.minutes, ...patch },
+      archiveStatus: nextArchiveStatus ?? 'reviewable',
+      minutes: { ...selectedRoom.minutes, reviewedConfirmed: false, ...patch },
+      auditLogs: patch.reviewedConfirmed ? [createAuditEntry(actorName, '确认纪要审核', '文本与纪要均通过校验，等待归档'), ...(selectedRoom.auditLogs || [])] : selectedRoom.auditLogs,
     });
   };
 
-  const handlePublishArchive = () => {
-    if (!selectedRoom) return;
+  const createManualMinutes = () => {
+    if (!selectedRoom || workflow?.locked || !workflow?.textReviewed || busy || selectedRoom.minutes) return;
+    setEditingMinutes(true);
+    onUpdateRoom({ ...selectedRoom, minutesError: undefined, minutes: {
+      version: 1, summary: '', topics: [], topicAnalyses: [], keyConclusions: [], actionItems: [],
+      risksAndOpenQuestions: [], reviewedConfirmed: false, publishedLocked: false, generatedAt: new Date().toISOString(),
+    }});
+  };
+
+  const addManualUtterance = () => {
+    if (!selectedRoom || workflow?.locked || busy || !validText(manualSource) || !validText(manualTranslation)) return;
+    onUpdateRoom({ ...invalidateText(selectedRoom), noTranscriptConfirmed: false,
+      utterances: [...(selectedRoom.utterances || []), {
+        id: `manual-${Date.now()}`, time: '00:00', seconds: 0,
+        speakerName: '人工补录', interpreterName: '人工补录', sourceText: manualSource.trim(),
+        translatedText: manualTranslation.trim(), translationStatus: 'draft',
+      }],
+      auditLogs: [createAuditEntry(actorName, '人工补录文本', '补录原文与译文，等待核对'), ...(selectedRoom.auditLogs || [])],
+    });
+    setManualSource(''); setManualTranslation('');
+  };
+
+  const handlePublishArchive = (confirmedPending = false) => {
+    if (!selectedRoom || !workflow?.canReview || busy) return;
+    if (workflow.pendingActions && !confirmedPending) { setConfirmPendingArchive(true); return; }
+    setConfirmPendingArchive(false);
+    setEditingMinutes(false);
     onUpdateRoom({
       ...selectedRoom,
       lifecycle: 'published',
+      archivedAt: new Date().toISOString(),
       archiveStatus: 'published',
-      minutes: selectedRoom.minutes
-        ? { ...selectedRoom.minutes, reviewedConfirmed: true, publishedLocked: true }
-        : {
-            summary: selectedRoom.title,
-            topics: [],
-            topicAnalyses: [],
-            keyConclusions: [],
-            actionItems: [],
-            risksAndOpenQuestions: [],
-            reviewedConfirmed: true,
-            publishedLocked: true,
-            generatedAt: new Date().toLocaleTimeString(),
-          },
+      minutes: { ...selectedRoom.minutes!, reviewedConfirmed: true, publishedLocked: true },
       auditLogs: [
         createAuditEntry(actorName, '确认发布归档', '已锁定正文与纪要'),
         ...(selectedRoom.auditLogs || []),
       ],
     });
     onNotify(c.publishedLockedBadge);
+  };
+
+  const createRevision = () => {
+    if (!selectedRoom?.minutes || !workflow?.locked) return;
+    onUpdateRoom({ ...selectedRoom, lifecycle: 'reviewable', archiveStatus: 'reviewable', transcriptReviewed: false, archivedAt: undefined,
+      minutesHistory: [...(selectedRoom.minutesHistory || []), selectedRoom.minutes],
+      minutes: { ...selectedRoom.minutes, version: (selectedRoom.minutes.version || 1) + 1, publishedLocked: false, reviewedConfirmed: false } });
+    setDetailTab('minutes'); setEditingMinutes(true);
+    onNotify('已创建修订草稿，原归档纪要保留在历史版本中。');
+  };
+
+  const handleRetryTranslation = async (uttId: string) => {
+    if (!selectedRoom || workflow?.locked || busy) return;
+    const roomId = selectedRoom.id;
+    const utterance = selectedRoom.utterances?.find(u => u.id === uttId);
+    if (!utterance) return;
+    setRetryingId(uttId);
+    try {
+      const response = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: utterance.sourceText, sourceLang: selectedRoom.sourceLang, targetLang: selectedRoom.targetLang }) });
+      const data = await response.json();
+      if (!response.ok || !validText(data.translation || '')) throw new Error(data.error || '翻译失败，请手动补录或重试');
+      const latest = roomsRef.current.find(r => r.id === roomId);
+      if (!latest || latest.trashed || archiveWorkflow(latest).locked) return;
+      onUpdateRoom({ ...invalidateText(latest), utterances: latest.utterances?.map(u => u.id === uttId ? { ...u, translatedText: data.translation, translationStatus: 'draft', gapResolved: true } : u) });
+      onNotify('重译成功，请核对译文后确认文本。');
+    } catch (error) { onNotify(error instanceof Error ? error.message : '翻译失败'); }
+    finally { setRetryingId(null); }
   };
 
   const downloadBlob = (content: string, filename: string, mime: string) => {
@@ -398,7 +491,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
   };
 
   return (
-    <div className={compactMobile ? 'space-y-3' : 'space-y-4'}>
+    <div className={`${compactMobile ? 'space-y-3' : 'space-y-4'} [&_button:disabled]:opacity-40 [&_button:disabled]:cursor-not-allowed`}>
       {/* Desktop Header Row (Lightweight Trash Trigger — no double-tab bar) */}
       {!compactMobile && subMode === 'list' && (
         <div className="flex items-center justify-between gap-3">
@@ -514,7 +607,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
         <div className={compactMobile ? 'space-y-3' : 'grid grid-cols-1 lg:grid-cols-12 gap-5 items-start'}>
           {/* Left Archive Filter & List */}
           {(!compactMobile || !mobileDetailOpen) && (
-          <div className={`${compactMobile ? '' : 'lg:col-span-4'} bg-white rounded-2xl border border-[#E5EAF3] p-4 space-y-3`}>
+          <div className={`${compactMobile ? '' : 'lg:col-span-4'} bg-white rounded-2xl border border-[#E5EAF3] ${compactMobile ? 'p-3 space-y-2' : 'p-4 space-y-3'}`}>
             <div className="flex items-center gap-2">
               <div className="relative flex-1 min-w-0">
                 <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -523,16 +616,21 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={c.searchArchivePlaceholder}
-                  className="w-full h-9 pl-8 pr-3 rounded-xl bg-[#F8FAFD] border border-[#DCE3EE] text-xs focus:outline-none focus:border-[#1668FF] focus:bg-white"
+                  className={`w-full pl-8 pr-3 rounded-xl bg-[#F8FAFD] border border-[#DCE3EE] text-xs focus:outline-none focus:border-[#1668FF] focus:bg-white ${compactMobile ? 'h-8' : 'h-9'}`}
                 />
               </div>
+              {compactMobile && (
+                <button type="button" onClick={() => setShowMobileFilters(value => !value)} aria-expanded={showMobileFilters} aria-label="筛选归档" className={`h-8 w-8 shrink-0 rounded-xl border inline-flex items-center justify-center cursor-pointer ${showMobileFilters || statusFilter !== 'all' || dateFilter !== 'all' ? 'border-[#CDE0FF] bg-[#EEF3FF] text-[#1668FF]' : 'border-[#DCE3EE] bg-[#F8FAFD] text-[#64748B]'}`}>
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                </button>
+              )}
               {compactMobile && (
                 <button
                   type="button"
                   onClick={() => setSubMode('trash')}
                   title={c.trashTab(trashedRooms.length)}
                   aria-label={c.trashTab(trashedRooms.length)}
-                  className="h-9 px-2.5 rounded-xl border border-[#DCE3EE] bg-[#F8FAFD] hover:bg-red-50 hover:border-red-200 text-[#64748B] hover:text-[#DC2626] inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                  className="h-8 px-2 rounded-xl border border-[#DCE3EE] bg-[#F8FAFD] hover:bg-red-50 hover:border-red-200 text-[#64748B] hover:text-[#DC2626] inline-flex items-center gap-1 shrink-0 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   {trashedRooms.length > 0 && (
@@ -544,15 +642,17 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
               )}
             </div>
 
+            {(!compactMobile || showMobileFilters) && <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <select
                 value={statusFilter}
                 onChange={(e) =>
                   setStatusFilter(e.target.value as 'all' | InterpArchiveStatus)
                 }
-                className="h-9 px-2.5 rounded-xl border border-[#DCE3EE] text-xs bg-white text-[#334155]"
+                className="vamx-select vamx-select--xs w-full"
               >
                 <option value="all">{c.allStatuses}</option>
+                <option value="empty">{c.archiveStatuses.empty}</option>
                 <option value="reviewable">{c.archiveStatuses.reviewable}</option>
                 <option value="processing">{c.archiveStatuses.processing}</option>
                 <option value="completed">{c.archiveStatuses.completed}</option>
@@ -562,7 +662,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
               <select
                 value={dateFilter}
                 onChange={(e) => setDateFilter(e.target.value as 'all' | 'today' | '7d' | 'month')}
-                className="h-9 px-2.5 rounded-xl border border-[#DCE3EE] text-xs bg-white text-[#334155]"
+                className="vamx-select vamx-select--xs w-full"
               >
                 <option value="all">{c.allDates}</option>
                 <option value="today">{c.dateToday}</option>
@@ -579,6 +679,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
               <ArrowUpDown className="w-3 h-3" />
               <span>{sortOrder === 'newest' ? c.sortNewest : c.sortOldest}</span>
             </button>
+            </div>}
 
             <div className="divide-y divide-[#F1F5F9] max-h-[540px] overflow-y-auto thin-scrollbar">
               {filteredList.map((r) => {
@@ -587,6 +688,8 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                 const statusColor =
                   archStatus === 'processing'
                     ? 'text-[#1668FF]'
+                    : archStatus === 'empty'
+                    ? 'text-[#94A3B8]'
                     : archStatus === 'completed'
                     ? 'text-[#16A34A]'
                     : archStatus === 'published'
@@ -618,7 +721,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                     </div>
                     <div className="text-[11px] text-[#64748B] mt-1 tabular-nums">
                       {getLanguageOptionLabel(r.sourceLang, language)} →{' '}
-                      {getLanguageOptionLabel(r.targetLang, language)} · {formatSecMMSS(r.durationSec ?? 60)} ·{' '}
+                      {getLanguageOptionLabel(r.targetLang, language)}{archStatus !== 'empty' && <> · {formatSecMMSS(r.durationSec ?? 60)}</>} ·{' '}
                       {r.createdAt.slice(0, 10)}
                     </div>
                   </button>
@@ -656,17 +759,11 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                   const labelStyle =
                     detailArchStatus === 'published' || detailArchStatus === 'completed'
                       ? 'text-[#16A34A]'
+                      : detailArchStatus === 'empty'
+                      ? 'text-[#94A3B8]'
                       : detailArchStatus === 'processing'
                       ? 'text-[#1668FF]'
                       : 'text-[#D97706]';
-                  const bannerCopy =
-                    detailArchStatus === 'published'
-                      ? c.publishedBanner
-                      : detailArchStatus === 'completed'
-                      ? c.completedBanner
-                      : detailArchStatus === 'processing'
-                      ? c.processingBanner
-                      : c.pendingReviewBanner;
 
                   return (
                     <div className="bg-white rounded-2xl border border-[#E5EAF3] p-4 sm:p-5 space-y-2.5">
@@ -675,14 +772,20 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                           <h3 className="text-base font-display font-bold text-[#111827] leading-snug">
                             {selectedRoom.title}
                           </h3>
+                          <span className={`inline-block mt-1 text-xs font-medium ${labelStyle}`}>{c.archiveStatuses[detailArchStatus]}</span>
                           <div className="text-xs text-[#64748B] mt-1 tabular-nums">
                             {selectedRoom.createdAt} ·{' '}
                             {getLanguageOptionLabel(selectedRoom.sourceLang, language)} →{' '}
-                            {getLanguageOptionLabel(selectedRoom.targetLang, language)} ·{' '}
-                            {formatSecMMSS(duration)}
+                            {getLanguageOptionLabel(selectedRoom.targetLang, language)}
+                            {!workflow?.empty && <> · {formatSecMMSS(duration)}</>}
                           </div>
                         </div>
 
+                        <details className="relative shrink-0">
+                        <summary aria-label="更多操作" className="flex h-8 w-8 items-center justify-center cursor-pointer list-none rounded-lg border border-[#E5EAF3] bg-[#FAFBFD] text-[#64748B] [&::-webkit-details-marker]:hidden"><MoreHorizontal className="h-4 w-4" /></summary>
+                        <div className="absolute right-0 top-full mt-1 z-20 w-44 rounded-xl border border-[#E5EAF3] bg-white p-1.5 shadow-lg space-y-0.5">
+                        {workflow?.locked && <button type="button" onClick={e => { e.currentTarget.closest('details')?.removeAttribute('open'); createRevision(); }} className="w-full rounded-lg text-left p-2 text-xs text-[#334155] hover:bg-[#F5F8FD]">创建修订版本</button>}
+                        {!!selectedRoom.minutesHistory?.length && <button type="button" onClick={e => { e.currentTarget.closest('details')?.removeAttribute('open'); setDetailTab('minutes'); setShowHistory(s => !s); }} className="w-full rounded-lg text-left p-2 text-xs text-[#334155] hover:bg-[#F5F8FD]">历史版本</button>}
                         <button
                           type="button"
                           onClick={() => {
@@ -699,42 +802,33 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                             onNotify(c.moveToTrashBtn);
                           }}
                           title={c.moveToTrashBtn}
-                          className="h-8 px-2.5 rounded-lg border border-[#E5EAF3] bg-[#FAFBFD] hover:bg-red-50 hover:border-red-200 text-xs font-medium text-[#64748B] hover:text-[#DC2626] inline-flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
+                          className="w-full rounded-lg p-2 hover:bg-red-50 text-xs font-medium text-[#64748B] hover:text-[#DC2626] inline-flex items-center gap-1.5 cursor-pointer transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">{c.moveToTrashBtn}</span>
+                          <span>{c.moveToTrashBtn}</span>
                         </button>
+                        </div>
+                        </details>
                       </div>
 
-                      <div className="pt-2.5 border-t border-[#F1F5F9] flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                          <span className={`font-semibold shrink-0 ${labelStyle}`}>
-                            {c.archiveStatuses[detailArchStatus]}
-                          </span>
-                          <span className="text-[#CBD5E1] shrink-0">·</span>
-                          <span className="text-[#64748B] truncate">{bannerCopy}</span>
-                        </div>
-                        {detailArchStatus === 'completed' && (
-                          <button
-                            type="button"
-                            onClick={handlePublishArchive}
-                            className="h-7 px-2.5 rounded-lg bg-[#16A34A] hover:bg-[#15803D] text-white text-[11px] font-semibold shrink-0 cursor-pointer"
-                          >
-                            {c.publishArchiveBtn}
-                          </button>
-                        )}
-                      </div>
                     </div>
                   );
                 })()}
 
-                {/* 3 Archive Detail Tabs */}
-                <div className="bg-white rounded-2xl border border-[#E5EAF3] overflow-hidden">
+                {workflow?.empty ? (
+                  <div className="rounded-2xl border border-[#E5EAF3] bg-white px-5 py-8 text-center">
+                    <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-[#F1F5F9] text-[#94A3B8]"><FileText className="h-5 w-5" /></div>
+                    <h4 className="text-sm font-display font-semibold text-[#334155]">{c.archiveStatuses.empty}</h4>
+                    <p className="mx-auto mt-2 max-w-sm text-xs leading-6 text-[#64748B]">本场没有形成可用的录音、原文或译文，因此无需核对，也没有可生成的会议纪要。</p>
+                  </div>
+                ) : (
+                /* 3 Archive Detail Tabs */
+                <div className="bg-white rounded-2xl border border-[#E5EAF3]">
                   <div className="px-5 border-b border-[#EEF2F7] flex items-center gap-6 overflow-x-auto">
                     {(() => {
                       const anomalyCount = (selectedRoom.utterances || []).filter(
-                        (u) => u.translationStatus !== 'confirmed' || !u.translatedText
-                      ).length;
+                        (u) => isBlockedUtterance(u) || u.translationStatus !== 'confirmed'
+                      ).length + (workflow?.audioGaps || 0);
                       return (
                         [
                           { id: 'playback', label: c.tabPlayback, icon: <Headphones className="w-3.5 h-3.5" /> },
@@ -768,8 +862,8 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
 
                   {/* TAB 1: DUAL-TRACK PLAYBACK */}
                   {detailTab === 'playback' && (
-                    <div className="p-5 space-y-5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="p-4 sm:p-5 space-y-4">
+                      <div className="rounded-xl border border-[#E5EAF3] bg-[#FAFBFD] p-3 sm:p-4 space-y-3">
                         <div className="flex items-center gap-3">
                           <button
                             type="button"
@@ -778,24 +872,29 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                               setIsPlaying(next);
                               if (next) triggerPlayBeep();
                             }}
-                            className="h-10 px-5 rounded-xl bg-[#1668FF] hover:bg-[#0D59EB] text-white text-xs font-semibold inline-flex items-center gap-2 cursor-pointer"
+                            className="h-10 w-10 shrink-0 rounded-full bg-[#1668FF] hover:bg-[#0D59EB] text-white inline-flex items-center justify-center cursor-pointer"
+                            aria-label={isPlaying ? c.pauseBtn : c.playBtn}
                           >
                             {isPlaying ? (
                               <Pause className="w-3.5 h-3.5 fill-current" />
                             ) : (
                               <Play className="w-3.5 h-3.5 fill-current" />
                             )}
-                            <span>{isPlaying ? c.pauseBtn : c.playBtn}</span>
                           </button>
-                          <div className="text-xs">
-                            <div className="font-semibold text-[#111827]">{c.readyLabel}</div>
-                            <div className="font-mono text-[#64748B] tabular-nums">
-                              {formatSecMMSS(playTimeSec)} / {formatSecMMSS(duration)}
-                            </div>
-                          </div>
+                          <input
+                            type="range"
+                            aria-label="回放进度"
+                            min={0}
+                            max={duration}
+                            value={playTimeSec}
+                            onChange={(e) => setPlayTimeSec(Number(e.target.value))}
+                            className="min-w-0 flex-1 accent-[#1668FF] cursor-pointer"
+                          />
+                          <span className="shrink-0 font-mono text-[11px] text-[#64748B] tabular-nums whitespace-nowrap">
+                            {formatSecMMSS(playTimeSec)} / {formatSecMMSS(duration)}
+                          </span>
                         </div>
-
-                        <div className="inline-flex items-center p-1 rounded-xl bg-[#F1F5F9]">
+                        <div className="flex w-full items-center p-1 rounded-lg bg-[#EDF2F8]">
                           {(
                             [
                               { id: 'original', label: c.modeOrigOnly },
@@ -807,7 +906,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                               key={m.id}
                               type="button"
                               onClick={() => setTrackMode(m.id)}
-                              className={`h-8 px-3 rounded-lg text-xs font-medium cursor-pointer ${
+                              className={`h-8 flex-1 px-2 rounded-md text-xs font-medium cursor-pointer whitespace-nowrap ${
                                 trackMode === m.id
                                   ? 'bg-white text-[#1668FF] shadow-2xs font-semibold'
                                   : 'text-[#64748B]'
@@ -819,45 +918,29 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                         </div>
                       </div>
 
-                      {/* Scrubber */}
-                      <div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={duration}
-                          value={playTimeSec}
-                          onChange={(e) => setPlayTimeSec(Number(e.target.value))}
-                          className="w-full accent-[#1668FF] cursor-pointer"
-                        />
-                        <div className="flex items-center justify-between text-[11px] font-mono text-[#94A3B8] tabular-nums">
-                          <span>00:00</span>
-                          <span>{formatSecMMSS(duration)}</span>
-                        </div>
-                      </div>
-
                       {trackMode === 'mix' && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-[#FAFBFD] border border-[#EEF2F7]">
-                          <label className="flex items-center gap-2 text-xs text-[#475569]">
-                            <span className="w-16">{c.origVolLabel}</span>
+                        <div className={`grid gap-3 p-3 rounded-xl bg-[#FAFBFD] border border-[#EEF2F7] ${compactMobile ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                          <label className="flex min-w-0 items-center gap-2 text-xs text-[#475569]">
+                            <span className="w-16 shrink-0 whitespace-nowrap">{c.origVolLabel}</span>
                             <input
                               type="range"
                               min={0}
                               max={100}
                               value={origVol}
                               onChange={(e) => setOrigVol(Number(e.target.value))}
-                              className="flex-1 accent-[#1668FF]"
+                              className="min-w-0 flex-1 accent-[#1668FF]"
                             />
                             <span className="font-mono w-9 text-right">{origVol}%</span>
                           </label>
-                          <label className="flex items-center gap-2 text-xs text-[#475569]">
-                            <span className="w-16">{c.intVolLabel}</span>
+                          <label className="flex min-w-0 items-center gap-2 text-xs text-[#475569]">
+                            <span className="w-16 shrink-0 whitespace-nowrap">{c.intVolLabel}</span>
                             <input
                               type="range"
                               min={0}
                               max={100}
                               value={intVol}
                               onChange={(e) => setIntVol(Number(e.target.value))}
-                              className="flex-1 accent-[#1668FF]"
+                              className="min-w-0 flex-1 accent-[#1668FF]"
                             />
                             <span className="font-mono w-9 text-right">{intVol}%</span>
                           </label>
@@ -914,7 +997,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                                   >
                                     {seg.label}
                                   </button>
-                                  {seg.isGap && !seg.resolved && (
+                                  {seg.isGap && !seg.resolved && !workflow?.locked && (
                                     <div className="flex items-center gap-2 text-[11px]">
                                       <button
                                         type="button"
@@ -946,55 +1029,88 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
 
                   {/* TAB 2: TRANSCRIPT PROOFREADING */}
                   {detailTab === 'transcript' && (
-                    <div className="p-5 space-y-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="inline-flex items-center p-1 rounded-xl bg-[#F1F5F9]">
+                    <div className={`${compactMobile ? 'p-4' : 'p-5'} space-y-4`}>
+                      {workflow?.noTranscript && <div className="rounded-xl border border-[#E5EAF3] bg-[#FAFBFD] p-4 space-y-3">
+                        <p className="text-sm font-semibold text-[#111827]">没有可核对的原文与译文</p>
+                        <p className="text-xs leading-relaxed text-[#64748B]">本场没有形成发言文本。请勿将空白录音段当作转写结果；如有可靠内容，可人工补录。若确无可用文本，可标记后按现有纪要继续审核。</p>
+                        {!workflow.locked && !selectedRoom.noTranscriptConfirmed && <>
+                          <textarea aria-label="人工补录原文" placeholder="人工补录原文" rows={2} value={manualSource} onChange={e => setManualSource(e.target.value)} className="w-full rounded-lg border border-[#DCE3EE] bg-white p-3 text-sm" />
+                          <textarea aria-label="人工补录译文" placeholder="人工补录译文" rows={2} value={manualTranslation} onChange={e => setManualTranslation(e.target.value)} className="w-full rounded-lg border border-[#DCE3EE] bg-white p-3 text-sm" />
+                          <div className="flex flex-wrap gap-2">
+                            <button type="button" disabled={!validText(manualSource) || !validText(manualTranslation) || busy} onClick={addManualUtterance} className="h-9 rounded-lg bg-[#EEF3FF] px-3 text-xs font-semibold text-[#1668FF] disabled:opacity-40">保存补录文本</button>
+                            <button type="button" disabled={busy} onClick={() => onUpdateRoom({ ...selectedRoom, noTranscriptConfirmed: true, transcriptReviewed: false, auditLogs: [createAuditEntry(actorName, '确认无可核对文本', '本场未形成可核对原文与译文，纪要须由人工审阅'), ...(selectedRoom.auditLogs || [])] })} className="h-9 rounded-lg border border-[#DCE3EE] bg-white px-3 text-xs font-semibold text-[#475569]">确认无可核对文本</button>
+                          </div>
+                        </>}
+                        {selectedRoom.noTranscriptConfirmed && <p className="text-xs text-[#16A34A]">已标记无可核对文本。纪要需人工填写和审阅。</p>}
+                      </div>}
+                      {!workflow?.noTranscript && <div className={compactMobile ? 'flex flex-col gap-2' : 'flex flex-wrap items-center justify-between gap-2'}>
+                        <div className={`inline-flex items-center p-1 rounded-xl bg-[#F1F5F9] ${compactMobile ? 'w-full' : ''}`}>
                           <button
                             type="button"
                             onClick={() => setUtteranceFilter('all')}
-                            className={`h-8 px-3 rounded-lg text-xs font-medium cursor-pointer ${
+                            className={`h-8 px-3 rounded-lg text-xs font-medium cursor-pointer ${compactMobile ? 'flex-1' : ''} ${
                               utteranceFilter === 'all' ? 'bg-white text-[#111827] shadow-2xs' : 'text-[#64748B]'
                             }`}
                           >
-                            {c.filterAllUtterances}
+                            {c.filterAllUtterances} ({selectedRoom.utterances?.length || 0})
                           </button>
                           <button
                             type="button"
                             onClick={() => setUtteranceFilter('anomalies')}
-                            className={`h-8 px-3 rounded-lg text-xs font-medium cursor-pointer ${
+                            className={`h-8 px-3 rounded-lg text-xs font-medium cursor-pointer ${compactMobile ? 'flex-1' : ''} ${
                               utteranceFilter === 'anomalies'
                                 ? 'bg-white text-[#D97706] shadow-2xs'
                                 : 'text-[#64748B]'
                             }`}
                           >
-                            {c.filterAnomalies}
+                            {c.filterAnomalies} ({anomalyUtteranceCount + (workflow?.audioGaps || 0)})
                           </button>
                         </div>
 
-                        {!selectedRoom.minutes?.publishedLocked && (
-                          <button
+                        {!selectedRoom.minutes?.publishedLocked && !workflow?.noTranscript && editingUttId === null && (
+                          workflow?.textReviewed ? <span className={`h-9 px-3.5 rounded-xl bg-[#F0FDF4] text-[#16A34A] text-xs font-semibold inline-flex items-center gap-1.5 ${compactMobile ? 'w-full justify-center' : ''}`}><CheckCircle2 className="w-3.5 h-3.5" />{c.textConfirmedBadge}</span> : <button
                             type="button"
                             onClick={handleConfirmTranscriptAll}
-                            className="h-9 px-3.5 rounded-xl bg-[#EEF3FF] hover:bg-[#E1EBFF] text-[#1668FF] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                            disabled={!workflow?.textReady || busy}
+                            className={`h-9 px-3.5 rounded-xl bg-[#EEF3FF] hover:bg-[#E1EBFF] text-[#1668FF] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer ${compactMobile ? 'w-full justify-center' : ''}`}
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>{c.confirmTextOkBtn}</span>
                           </button>
                         )}
-                      </div>
+                      </div>}
+                      {!workflow?.noTranscript && !workflow?.textReady && !!workflow?.textBlockers && (
+                        <p className="text-xs text-[#B45309]">还有 {workflow.textBlockers} 段文字需补齐或校正，完成后即可确认。</p>
+                      )}
+
+                      {!!workflow?.audioGaps && (
+                        <div className="space-y-2">
+                          <p className="text-xs text-[#64748B]">文字校正后可先确认；录音缺段需单独核查，才能归档。</p>
+                          {[...(selectedRoom.originalSegments || []), ...(selectedRoom.interpretedSegments || [])]
+                            .filter(s => s.isGap && !s.resolved)
+                            .map(s => (
+                              <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#F3D5A1] bg-[#FFFBF2] p-3 text-xs">
+                                <span className="text-[#92400E]">录音缺段：{s.label}</span>
+                                {!workflow.locked && <button disabled={busy} type="button" onClick={() => handleResolveGapSegment(s.id)} className="font-semibold text-[#1668FF] hover:underline">确认已核查缺段</button>}
+                              </div>
+                            ))}
+                        </div>
+                      )}
 
                       <div className="space-y-3">
+                        {utteranceFilter === 'anomalies' && anomalyUtteranceCount === 0 && !workflow?.audioGaps && !workflow?.noTranscript && (
+                          <div className="rounded-xl bg-[#F7FAFD] px-4 py-6 text-center text-xs text-[#64748B]">没有异常或待确认段落</div>
+                        )}
                         {(selectedRoom.utterances || [])
                           .filter(
                             (u) =>
                               utteranceFilter === 'all' ||
-                              u.translationStatus !== 'confirmed' ||
-                              !u.translatedText
+                              u.translationStatus !== 'confirmed' || isBlockedUtterance(u)
                           )
                           .map((u) => (
                             <div
                               key={u.id}
-                              className="p-4 rounded-xl border border-[#EEF2F7] bg-[#FAFBFD] space-y-2"
+                              className="p-4 rounded-xl border border-[#E5EAF3] bg-white space-y-3"
                             >
                               <div className="flex items-center justify-between gap-2 text-xs">
                                 <button
@@ -1016,14 +1132,28 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                                   {c.sentenceStatuses[u.translationStatus]}
                                 </span>
                               </div>
-                              <p className="text-xs text-[#475569] leading-relaxed">{u.sourceText}</p>
+                              <div className="space-y-1.5">
+                                <span className="text-[11px] font-semibold text-[#94A3B8]">原文</span>
+                                <p className="text-sm text-[#475569] leading-6 break-words">{u.sourceText || '暂无原文'}</p>
+                                {!workflow?.locked && <details className="text-xs text-[#1668FF]"><summary className="cursor-pointer">校正原文</summary><textarea aria-label="校正原文" disabled={busy} value={u.sourceText} onChange={e => onUpdateRoom({ ...invalidateText(selectedRoom), utterances: selectedRoom.utterances?.map(item => item.id === u.id ? { ...item, sourceText: e.target.value } : item) })} className="w-full rounded-lg border border-[#DCE3EE] bg-white p-3 mt-2 text-sm text-[#334155]" /></details>}
+                              </div>
+                              {isBlockedUtterance(u) && <p className="text-xs text-red-600" role="alert">{!validText(u.sourceText) ? '原文缺失，请展开“校正原文”补录。' : !validText(u.translatedText) ? '译文缺失或无效，请人工补录有效译文。' : u.isGap && !u.gapResolved ? '该段缺失，请核查并保存译文。' : '译文处理未完成，请核查后保存。'}</p>}
+                              {!workflow?.locked && (u.translationStatus === 'failed' || !validText(u.translatedText)) && <button type="button" disabled={busy} onClick={() => handleRetryTranslation(u.id)} className="text-xs text-blue-600 disabled:opacity-50">{retryingId === u.id ? '重译中…' : '重试翻译'}</button>}
+                              <div className="border-t border-[#EEF2F7] pt-3 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-semibold text-[#94A3B8]">译文</span>
+                                  {!workflow?.locked && editingUttId !== u.id && (
+                                    <button type="button" onClick={() => { setEditingUttId(u.id); setEditingUttDraft(u.translatedText); }} className="text-xs font-medium text-[#1668FF] cursor-pointer">{c.editBtn}</button>
+                                  )}
+                                </div>
                               {editingUttId === u.id ? (
-                                <div className="space-y-2 pt-1">
+                                <div className="space-y-2">
                                   <textarea
                                     rows={2}
+                                    aria-label="编辑译文"
                                     value={editingUttDraft}
                                     onChange={(e) => setEditingUttDraft(e.target.value)}
-                                    className="w-full p-2.5 rounded-xl border border-[#1668FF] bg-white text-xs focus:outline-none"
+                                    className="w-full p-3 rounded-xl border border-[#1668FF] bg-white text-sm leading-6 focus:outline-none"
                                   />
                                   <div className="flex items-center gap-2">
                                     <button
@@ -1043,26 +1173,15 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                                   </div>
                                 </div>
                               ) : (
-                                <div className="flex items-start justify-between gap-3 pt-1">
-                                  <p className="text-sm font-medium text-[#111827] leading-relaxed">
+                                <div>
+                                  <p className="text-sm font-medium text-[#111827] leading-6 break-words">
                                     {u.translatedText || (
                                       <span className="text-[#DC2626] italic">{u.gapReason || c.gapWarningTag}</span>
                                     )}
                                   </p>
-                                  {!selectedRoom.minutes?.publishedLocked && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setEditingUttId(u.id);
-                                        setEditingUttDraft(u.translatedText);
-                                      }}
-                                      className="text-xs text-[#1668FF] hover:underline shrink-0 cursor-pointer"
-                                    >
-                                      {c.editBtn}
-                                    </button>
-                                  )}
                                 </div>
                               )}
+                              </div>
                             </div>
                           ))}
                       </div>
@@ -1071,56 +1190,31 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
 
                   {/* TAB 3: AI STRUCTURED MINUTES & PUBLISH */}
                   {detailTab === 'minutes' && (
-                    <div className="p-5 space-y-5">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {!selectedRoom.minutes?.publishedLocked && (
+                    <div className="p-4 sm:p-5 space-y-4">
+                      <div className="flex items-center gap-2 border-b border-[#EEF2F7] pb-3">
+                        <div className="min-w-0 flex-1 flex items-baseline gap-1.5">
+                          <h4 className="font-display text-sm font-bold text-[#111827] whitespace-nowrap">{c.tabMinutes}</h4>
+                          {selectedRoom.minutes && <span className="text-[11px] text-[#94A3B8]">v{selectedRoom.minutes.version || 1}</span>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {!selectedRoom.minutes?.publishedLocked && editingMinutes && !workflow?.noTranscript && (
                             <button
                               type="button"
                               onClick={handleGenerateMinutes}
-                              disabled={isGeneratingMinutes}
+                              disabled={busy || !workflow?.textReviewed}
                               className="h-9 px-4 rounded-xl bg-[#1668FF] hover:bg-[#0D59EB] disabled:opacity-60 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
                             >
                               <Sparkles className="w-3.5 h-3.5" />
-                              <span>{isGeneratingMinutes ? c.generatingMinutesBtn : c.generateMinutesBtn}</span>
+                              <span>{isGeneratingMinutes ? c.generatingMinutesBtn : selectedRoom.minutes ? '重新生成纪要' : c.generateMinutesBtn}</span>
                             </button>
                           )}
 
-                          {selectedRoom.minutes && !selectedRoom.minutes.publishedLocked && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  updateMinutes({ reviewedConfirmed: true }, 'completed');
-                                  onNotify(c.confirmReviewBtn);
-                                }}
-                                className={`h-9 px-3.5 rounded-xl border text-xs font-medium cursor-pointer ${
-                                  selectedRoom.minutes.reviewedConfirmed
-                                    ? 'border-[#BBE7CA] bg-[#EDFDF3] text-[#16A34A] font-semibold'
-                                    : 'border-[#DCE3EE] bg-white hover:bg-zinc-50 text-[#111827]'
-                                }`}
-                              >
-                                {c.confirmReviewBtn}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={handlePublishArchive}
-                                className="h-9 px-3.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold cursor-pointer"
-                              >
-                                {c.publishArchiveBtn}
-                              </button>
-                            </>
-                          )}
-
-                          {selectedRoom.minutes?.publishedLocked && (
-                            <span className="h-9 px-3 rounded-xl bg-[#EDFDF3] text-[#16A34A] text-xs font-semibold inline-flex items-center gap-1.5">
-                              <Lock className="w-3.5 h-3.5" />
-                              <span>{c.publishedLockedBadge}</span>
-                            </span>
-                          )}
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-1.5">
+                        {selectedRoom.minutes && !workflow?.locked && !editingMinutes && <button type="button" disabled={busy} onClick={() => setEditingMinutes(true)} className="h-8 rounded-lg bg-[#EEF3FF] px-2.5 text-xs font-semibold text-[#1668FF] hover:bg-[#E1EBFF] whitespace-nowrap">编辑</button>}
+                        <details className="relative">
+                        <summary className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#DCE3EE] bg-white px-2.5 text-xs font-medium text-[#475569] cursor-pointer list-none whitespace-nowrap [&::-webkit-details-marker]:hidden"><Download className="h-3.5 w-3.5" />导出</summary>
+                        <div className="absolute right-0 top-full mt-1 z-20 w-40 rounded-xl border border-[#E5EAF3] bg-white p-1.5 shadow-lg space-y-0.5">
                           <button
                             type="button"
                             onClick={() =>
@@ -1130,7 +1224,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                                 'application/msword'
                               )
                             }
-                            className="h-8 px-2.5 rounded-lg border border-[#DCE3EE] text-[11px] font-medium text-[#475569] hover:bg-zinc-50 inline-flex items-center gap-1 cursor-pointer"
+                            className="w-full rounded-lg p-2 text-xs text-[#475569] hover:bg-[#F5F8FD] inline-flex items-center gap-2 cursor-pointer"
                           >
                             <Download className="w-3 h-3" />
                             <span>{c.exportDocx}</span>
@@ -1144,7 +1238,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                                 'text/plain;charset=utf-8'
                               )
                             }
-                            className="h-8 px-2.5 rounded-lg border border-[#DCE3EE] text-[11px] font-medium text-[#475569] hover:bg-zinc-50 inline-flex items-center gap-1 cursor-pointer"
+                            className="w-full rounded-lg p-2 text-xs text-[#475569] hover:bg-[#F5F8FD] inline-flex items-center gap-2 cursor-pointer"
                           >
                             <Download className="w-3 h-3" />
                             <span>{c.exportTxt}</span>
@@ -1158,7 +1252,7 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                                 'text/plain;charset=utf-8'
                               )
                             }
-                            className="h-8 px-2.5 rounded-lg border border-[#DCE3EE] text-[11px] font-medium text-[#475569] hover:bg-zinc-50 inline-flex items-center gap-1 cursor-pointer"
+                            className="w-full rounded-lg p-2 text-xs text-[#475569] hover:bg-[#F5F8FD] inline-flex items-center gap-2 cursor-pointer"
                           >
                             <Download className="w-3 h-3" />
                             <span>{c.exportSrt}</span>
@@ -1170,28 +1264,36 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                               navigator.clipboard?.writeText(link).catch(() => {});
                               onNotify(c.copyShareLink);
                             }}
-                            className="h-8 px-2.5 rounded-lg border border-[#DCE3EE] text-[11px] font-medium text-[#1668FF] hover:bg-[#F5F8FD] inline-flex items-center gap-1 cursor-pointer"
+                            className="w-full rounded-lg p-2 text-xs text-[#1668FF] hover:bg-[#F5F8FD] inline-flex items-center gap-2 cursor-pointer"
                           >
                             <Copy className="w-3 h-3" />
                             <span>{c.copyShareLink}</span>
                           </button>
                         </div>
+                        </details>
                       </div>
 
+                      {!workflow?.locked && workflow?.textReviewed && !selectedRoom.minutes && <button type="button" disabled={busy} className="text-xs text-[#1668FF]" onClick={createManualMinutes}>手动填写纪要</button>}
+                      {showHistory && !!selectedRoom.minutesHistory?.length && <details className="text-xs text-slate-600"><summary>历史纪要版本（{selectedRoom.minutesHistory.length}）</summary>{selectedRoom.minutesHistory.map((minute, i) => <details key={i} className="mt-3 border-t pt-2"><summary>v{minute.version || i + 1} · {minute.publishedLocked ? '已归档' : '草稿'} · {minute.generatedAt}</summary><p className="my-2 whitespace-pre-wrap">{minute.summary}</p><p>{minute.topics.join(' · ')}</p>{minute.topicAnalyses.map((a,j) => <p key={j}>{a.topic}：{a.analysis}</p>)}{minute.keyConclusions.map(a => <p key={a.id}>{a.timestamp} {a.text}</p>)}{minute.actionItems.map(a => <p key={a.id}>{a.task} · {a.owner} · {a.deadline}</p>)}{minute.risksAndOpenQuestions.map((a,j) => <p key={j}>{a}</p>)}</details>)}</details>}
+                      {selectedRoom.minutes?.stale && !workflow?.locked && <button type="button" disabled={!workflow?.textReviewed || busy} className="text-xs text-amber-700" onClick={() => updateMinutes({ stale: false })}>我已人工核对纪要与最新原文、译文一致</button>}
                       {!selectedRoom.minutes ? (
                         <div className="py-10 text-center rounded-xl border border-dashed border-[#DCE3EE] text-xs text-[#64748B]">
-                          {c.generateMinutesBtn}
+                          {workflow?.noTranscript ? '暂无会议纪要。确认无可核对文本后，可手动填写。' : c.generateMinutesBtn}
                         </div>
+                      ) : !editingMinutes || workflow?.locked ? (
+                        <MinutesReader minutes={selectedRoom.minutes} onJump={time => jumpToSeconds(parseTimestampSec(time), true)} />
                       ) : (
                         <div className="space-y-5">
                           <div className="space-y-1.5">
                             <div className="text-xs font-bold text-[#111827]">{c.minSummary}</div>
                             <textarea
                               rows={3}
+                              data-review-missing={!validText(selectedRoom.minutes.summary) && !workflow?.locked ? 'true' : undefined}
+                              aria-invalid={!validText(selectedRoom.minutes.summary) && !workflow?.locked}
                               disabled={selectedRoom.minutes.publishedLocked}
                               value={selectedRoom.minutes.summary}
                               onChange={(e) => updateMinutes({ summary: e.target.value })}
-                              className="w-full p-3 rounded-xl border border-[#DCE3EE] text-xs text-[#334155] leading-relaxed disabled:bg-[#FAFBFD] focus:outline-none focus:border-[#1668FF]"
+                              className={`w-full p-3 rounded-xl border text-xs text-[#334155] leading-relaxed disabled:bg-[#FAFBFD] focus:outline-none focus:border-[#1668FF] ${!validText(selectedRoom.minutes.summary) && !workflow?.locked ? 'border-amber-500 bg-amber-50' : 'border-[#DCE3EE]'}`}
                             />
                           </div>
 
@@ -1283,10 +1385,35 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                             </div>
                           )}
 
-                          {/* Action Items Table */}
+                          {/* Action items: readable cards on phones, table on wide screens */}
                           <div className="space-y-2">
-                            <div className="text-xs font-bold text-[#111827]">{c.minActions}</div>
-                            <div className="overflow-x-auto border border-[#EEF2F7] rounded-xl">
+                            <div className="text-sm font-bold text-[#111827]">{compactMobile && language === 'zh' ? '待办事项' : c.minActions}</div>
+                            {!workflow?.locked && <button type="button" disabled={busy} className="text-xs text-blue-600" onClick={() => updateMinutes({ actionItems: [...selectedRoom.minutes!.actionItems, { id: crypto.randomUUID(), task: '', owner: '', deadline: '', sourceTimestamp: '00:00' }] })}>添加待办事项</button>}
+                            {selectedRoom.minutes.actionItems.length === 0 && <p className="text-xs text-slate-500">本次会议暂无明确待办事项。</p>}
+                            <div className={`${compactMobile ? 'space-y-3' : 'space-y-3 md:hidden'}`}>
+                              {selectedRoom.minutes.actionItems.map((act, index) => (
+                                <div key={act.id} className="rounded-xl border border-[#DCE3EE] bg-[#FAFBFD] p-4 space-y-4">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-sm font-semibold text-[#111827]">待办 {index + 1}</span>
+                                    {!workflow?.locked && <button type="button" disabled={busy} className="text-sm text-red-600" onClick={() => updateMinutes({ actionItems: selectedRoom.minutes!.actionItems.filter(a => a.id !== act.id) })}>移除</button>}
+                                  </div>
+                                  <label className="block space-y-1.5">
+                                    <span className="text-sm text-[#64748B]">{c.minActionTask}</span>
+                                    <textarea rows={2} aria-invalid={!workflow?.locked && isMissingMinutesField(act.task)} data-review-missing={!workflow?.locked && isMissingMinutesField(act.task) ? 'true' : undefined} disabled={workflow?.locked || busy} value={act.task} onChange={e => updateMinutes({ actionItems: selectedRoom.minutes!.actionItems.map(a => a.id === act.id ? { ...a, task: e.target.value } : a) })} className={`w-full rounded-lg border p-3 text-base leading-relaxed text-[#111827] disabled:bg-transparent ${!workflow?.locked && isMissingMinutesField(act.task) ? 'border-amber-500 bg-amber-50' : 'border-[#DCE3EE] bg-white'}`} />
+                                  </label>
+                                  <div className="grid grid-cols-2 gap-3">
+                                    {(['owner', 'deadline'] as const).map(field => (
+                                      <label key={field} className="min-w-0 space-y-1.5">
+                                        <span className="block text-sm text-[#64748B]">{field === 'owner' ? c.minActionOwner : c.minActionDeadline}</span>
+                                        <input type="text" aria-invalid={!workflow?.locked && isMissingMinutesField(act[field])} data-review-missing={!workflow?.locked && isMissingMinutesField(act[field]) ? 'true' : undefined} disabled={workflow?.locked || busy} value={act[field]} onChange={e => updateMinutes({ actionItems: selectedRoom.minutes!.actionItems.map(a => a.id === act.id ? { ...a, [field]: e.target.value } : a) })} className={`w-full min-w-0 rounded-lg border p-3 text-base text-[#111827] disabled:bg-transparent ${!workflow?.locked && isMissingMinutesField(act[field]) ? 'border-amber-500 bg-amber-50' : 'border-[#DCE3EE] bg-white'}`} />
+                                      </label>
+                                    ))}
+                                  </div>
+                                  <button type="button" onClick={() => jumpToSeconds(parseTimestampSec(act.sourceTimestamp), true)} className="text-sm font-medium text-[#1668FF]">查看原文 · {act.sourceTimestamp}</button>
+                                </div>
+                              ))}
+                            </div>
+                            <div className={`${compactMobile ? 'hidden' : 'hidden md:block'} overflow-x-auto border border-[#EEF2F7] rounded-xl`}>
                               <table className="w-full text-left text-xs">
                                 <thead className="bg-[#FAFBFD] text-[#64748B] border-b border-[#EEF2F7]">
                                   <tr>
@@ -1299,10 +1426,13 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                                 <tbody className="divide-y divide-[#EEF2F7]">
                                   {selectedRoom.minutes.actionItems.map((act: InterpMinutesActionItem) => (
                                     <tr key={act.id}>
-                                      <td className="py-2 px-3 text-[#111827]">{act.task}</td>
+                                      <td className="py-2 px-3 text-[#111827]"><input aria-label={`第 ${selectedRoom.minutes!.actionItems.indexOf(act) + 1} 项待办内容`} aria-invalid={!workflow?.locked && isMissingMinutesField(act.task)} data-review-missing={!workflow?.locked && isMissingMinutesField(act.task) ? 'true' : undefined} disabled={workflow?.locked || busy} value={act.task} onChange={e => updateMinutes({ actionItems: selectedRoom.minutes!.actionItems.map(a => a.id === act.id ? { ...a, task: e.target.value } : a) })} className={`w-full border rounded p-1 ${!workflow?.locked && isMissingMinutesField(act.task) ? 'border-amber-500 bg-amber-50' : 'border-[#DCE3EE]'}`} /></td>
                                       <td className="py-2 px-3">
                                         <input
                                           type="text"
+                                          aria-label={`第 ${selectedRoom.minutes!.actionItems.indexOf(act) + 1} 项负责人`}
+                                          aria-invalid={!workflow?.locked && isMissingMinutesField(act.owner)}
+                                          data-review-missing={!workflow?.locked && isMissingMinutesField(act.owner) ? 'true' : undefined}
                                           disabled={selectedRoom.minutes?.publishedLocked}
                                           value={act.owner}
                                           onChange={(e) =>
@@ -1312,12 +1442,15 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                                               ),
                                             })
                                           }
-                                          className="w-24 px-2 py-1 rounded border border-[#DCE3EE] text-xs disabled:border-transparent"
+                                          className={`w-24 px-2 py-1 rounded border text-xs disabled:border-transparent ${!workflow?.locked && isMissingMinutesField(act.owner) ? 'border-amber-500 bg-amber-50' : 'border-[#DCE3EE]'}`}
                                         />
                                       </td>
                                       <td className="py-2 px-3">
                                         <input
                                           type="text"
+                                          aria-label={`第 ${selectedRoom.minutes!.actionItems.indexOf(act) + 1} 项截止时间`}
+                                          aria-invalid={!workflow?.locked && isMissingMinutesField(act.deadline)}
+                                          data-review-missing={!workflow?.locked && isMissingMinutesField(act.deadline) ? 'true' : undefined}
                                           disabled={selectedRoom.minutes?.publishedLocked}
                                           value={act.deadline}
                                           onChange={(e) =>
@@ -1327,10 +1460,11 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                                               ),
                                             })
                                           }
-                                          className="w-24 px-2 py-1 rounded border border-[#DCE3EE] text-xs disabled:border-transparent"
+                                          className={`w-24 px-2 py-1 rounded border text-xs disabled:border-transparent ${!workflow?.locked && isMissingMinutesField(act.deadline) ? 'border-amber-500 bg-amber-50' : 'border-[#DCE3EE]'}`}
                                         />
                                       </td>
                                       <td className="py-2 px-3 font-mono tabular-nums">
+                                        {!workflow?.locked && <button type="button" disabled={busy} className="text-xs text-red-600 mr-2" onClick={() => updateMinutes({ actionItems: selectedRoom.minutes!.actionItems.filter(a => a.id !== act.id) })}>移除待办</button>}
                                         <button
                                           type="button"
                                           onClick={() => jumpToSeconds(parseTimestampSec(act.sourceTimestamp), true)}
@@ -1359,9 +1493,37 @@ export const ArchiveWorkspace: React.FC<ArchiveWorkspaceProps> = ({
                           )}
                         </div>
                       )}
+
+                      {!workflow?.locked && (
+                        <div className="border-t border-slate-100 pt-4 space-y-3">
+                          {selectedRoom.minutesError && <p role="alert" className="text-xs text-red-600">生成失败：{selectedRoom.minutesError}</p>}
+                          {selectedRoom.minutes?.stale && <p className="text-xs text-amber-700">文本已变更，请重新核对纪要。</p>}
+                          {!workflow?.textReviewed && <p className="text-xs text-amber-700">{workflow?.noTranscript ? '本场没有可核对原文，请在“原文与译文”中确认无可用文本，或人工补录。' : workflow?.textBlockers ? `有 ${workflow.textBlockers} 项文字待校正` : '请先核对原文与译文'}</p>}
+                          {!!workflow?.audioGaps && <p className="text-xs text-amber-700">还有 {workflow.audioGaps} 处录音缺段，请到“原文与译文”核查后处理。</p>}
+                          {workflow?.textReviewed && selectedRoom.minutes && !workflow.minutesReady && !selectedRoom.minutes.stale && <p className="text-xs text-amber-700">请补充有效摘要和待办内容。</p>}
+                          {confirmPendingArchive ? (
+                            <div role="dialog" aria-label="待跟进事项提醒" className="rounded-xl bg-amber-50 p-4 space-y-3">
+                              <p className="text-sm text-amber-900">有 {workflow?.pendingActions} 项待办的负责人或截止时间尚未确定，将以“待跟进”保留在纪要中。</p>
+                              <div className="flex gap-3"><button type="button" disabled={busy} onClick={() => handlePublishArchive(true)} className="rounded-lg bg-blue-600 text-white px-4 py-2 text-sm">保留待跟进并归档</button><button type="button" onClick={() => setConfirmPendingArchive(false)} className="text-sm">返回</button></div>
+                            </div>
+                          ) : (
+                            <button type="button" disabled={busy} onClick={() => {
+                              if (!workflow?.textReviewed) { setDetailTab('transcript'); return; }
+                              if (workflow.audioGaps) { setDetailTab('transcript'); return; }
+                              if (!selectedRoom.minutes) { if (workflow.noTranscript) createManualMinutes(); else void handleGenerateMinutes(); return; }
+                              if (editingMinutes) { setEditingMinutes(false); return; }
+                              if (!workflow.minutesReady) { setEditingMinutes(true); setFocusMissingField(true); return; }
+                              handlePublishArchive();
+                            }} className="w-full sm:w-auto h-10 rounded-xl bg-[#1668FF] hover:bg-[#0D59EB] px-5 text-xs font-semibold text-white">
+                              {busy ? '处理中…' : !workflow?.textReviewed ? workflow?.noTranscript ? '处理无原文记录' : '核对原文与译文' : workflow.audioGaps ? '处理录音缺段' : !selectedRoom.minutes ? workflow.noTranscript ? '手动填写纪要' : '生成纪要' : editingMinutes ? '完成编辑' : !workflow.minutesReady ? '完善纪要' : '确认并归档'}
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
+                )}
               </>
             )}
           </div>

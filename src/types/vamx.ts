@@ -88,6 +88,7 @@ export interface UserProfileState {
   userName: string;
   userEmail: string;
   userPhone: string;
+  avatarDataUrl?: string;
   credits: number;
   lastCheckInDate: string | null;
   notifyOnDone: boolean;
@@ -156,6 +157,7 @@ export type InterpLifecycleStatus =
   | 'published';
 
 export type InterpArchiveStatus =
+  | 'empty'
   | 'reviewable'
   | 'processing'
   | 'completed'
@@ -211,6 +213,8 @@ export interface InterpMinutesActionItem {
 }
 
 export interface InterpMinutesData {
+  version?: number;
+  stale?: boolean;
   summary: string;
   topics: string[];
   topicAnalyses: Array<{ topic: string; analysis: string }>;
@@ -231,6 +235,11 @@ export interface InterpAuditLog {
 }
 
 export interface InterpretationRoom {
+  noTranscriptConfirmed?: boolean;
+  transcriptReviewed?: boolean;
+  minutesError?: string;
+  archivedAt?: string;
+  minutesHistory?: InterpMinutesData[];
   id: string;
   title: string;
   sourceLang: string;

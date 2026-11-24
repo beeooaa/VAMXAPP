@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Check,
-  ChevronDown,
   Download,
   FileAudio,
   Link2,
@@ -698,7 +697,7 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[420px] bg-white rounded-t-3xl border-t border-[#E6ECF5] overflow-hidden shadow-2xl max-h-[88%] flex flex-col"
+        className={`w-full max-w-[420px] max-h-[88dvh] bg-white rounded-t-3xl border-t border-[#E6ECF5] overflow-hidden shadow-2xl flex flex-col ${mode === 'device' ? '' : 'overflow-y-auto'}`}
       >
         {/* Hidden native audio file input */}
         <input
@@ -853,7 +852,7 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
                 <select
                   value={targetLang}
                   onChange={(e) => setTargetLang(e.target.value)}
-                  className="w-full h-11 pl-3.5 pr-9 rounded-2xl border border-[#DCE3EE] bg-white text-[13.5px] text-[#111827] appearance-none focus:outline-none focus:border-[#1668FF] cursor-pointer"
+                  className="vamx-select vamx-select--lg w-full"
                 >
                   {TARGET_LANGUAGES.map((langOpt) => (
                     <option key={langOpt} value={langOpt}>
@@ -861,7 +860,6 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-[#64748B] absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
@@ -871,7 +869,7 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
                 <select
                   value={selectedFolderId}
                   onChange={(e) => setSelectedFolderId(e.target.value)}
-                  className="w-full h-11 pl-3.5 pr-9 rounded-2xl border border-[#DCE3EE] bg-white text-[13.5px] text-[#111827] appearance-none focus:outline-none focus:border-[#1668FF] cursor-pointer"
+                  className="vamx-select vamx-select--lg w-full"
                 >
                   {folderOptions.map((f) => (
                     <option key={f.id} value={f.id}>
@@ -879,7 +877,6 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-[#64748B] absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
@@ -949,7 +946,7 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
                 <select
                   value={targetLang}
                   onChange={(e) => setTargetLang(e.target.value)}
-                  className="w-full h-11 pl-3.5 pr-9 rounded-2xl border border-[#DCE3EE] bg-white text-[13.5px] text-[#111827] appearance-none focus:outline-none focus:border-[#1668FF] cursor-pointer"
+                  className="vamx-select vamx-select--lg w-full"
                 >
                   {TARGET_LANGUAGES.map((langOpt) => (
                     <option key={langOpt} value={langOpt}>
@@ -957,7 +954,6 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-[#64748B] absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
@@ -967,7 +963,7 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
                 <select
                   value={selectedFolderId}
                   onChange={(e) => setSelectedFolderId(e.target.value)}
-                  className="w-full h-11 pl-3.5 pr-9 rounded-2xl border border-[#DCE3EE] bg-white text-[13.5px] text-[#111827] appearance-none focus:outline-none focus:border-[#1668FF] cursor-pointer"
+                  className="vamx-select vamx-select--lg w-full"
                 >
                   {folderOptions.map((f) => (
                     <option key={f.id} value={f.id}>
@@ -975,7 +971,6 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-[#64748B] absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
@@ -1092,7 +1087,7 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
                 <select
                   value={selectedFolderId}
                   onChange={(e) => setSelectedFolderId(e.target.value)}
-                  className="w-full h-11 pl-3.5 pr-9 rounded-2xl border border-[#DCE3EE] bg-white text-[13.5px] text-[#111827] appearance-none focus:outline-none focus:border-[#1668FF] cursor-pointer"
+                  className="vamx-select vamx-select--lg w-full"
                 >
                   {folderOptions.map((f) => (
                     <option key={f.id} value={f.id}>
@@ -1100,7 +1095,6 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="w-4 h-4 text-[#64748B] absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
@@ -1120,37 +1114,31 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
             <div className="pt-3 pb-1 flex justify-center shrink-0">
               <div className="w-10 h-1 rounded-full bg-zinc-200" />
             </div>
-            <div className="px-5 pt-2 pb-3 border-b border-[#EDF2F8] flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <h3 className="text-base font-display font-bold text-[#111827]">{imp.deviceTitle}</h3>
-                <p className="text-xs text-[#64748B] mt-0.5 font-mono tabular-nums truncate">
-                  {device.bound === false
-                    ? imp.deviceUnboundStatus
-                    : device.connected
-                    ? imp.deviceConnectedStatus(device.name, pendingFiles.length, importedFiles.length)
-                    : imp.deviceOfflineStatus}
-                </p>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {pendingFiles.length > 0 && device.bound !== false && device.connected && (
-                  <button
-                    type="button"
-                    onClick={handleImportAllPending}
-                    disabled={!!importingId}
-                    className="h-9 px-3 rounded-lg bg-[#1668FF] hover:bg-[#0D59EB] disabled:opacity-60 text-white text-xs font-medium whitespace-nowrap cursor-pointer"
-                  >
-                    {pendingFiles.length > 1 ? imp.importAllBtn : imp.importOneBtn}
-                  </button>
-                )}
+            <div className="px-5 pt-2 pb-3 border-b border-[#EDF2F8] shrink-0">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="min-w-0 text-base font-display font-bold text-[#111827]">{imp.deviceTitle}</h3>
                 <button
                   type="button"
                   onClick={onClose}
                   aria-label={imp.closeImportAria}
-                  className="w-11 h-11 -mr-2 rounded-full hover:bg-zinc-100 flex items-center justify-center cursor-pointer"
+                  className="w-9 h-9 -mr-2 shrink-0 rounded-full hover:bg-zinc-100 flex items-center justify-center cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
+              <p className="mt-0.5 text-xs text-[#64748B] font-mono break-all">
+                {device.bound === false ? imp.deviceUnboundStatus : device.connected ? device.name : imp.deviceOfflineStatus}
+              </p>
+              {pendingFiles.length > 0 && device.bound !== false && device.connected && (
+                <button
+                  type="button"
+                  onClick={handleImportAllPending}
+                  disabled={!!importingId}
+                  className="mt-3 h-9 w-full rounded-lg bg-[#1668FF] hover:bg-[#0D59EB] disabled:opacity-60 text-white text-xs font-semibold cursor-pointer"
+                >
+                  {pendingFiles.length > 1 ? imp.importAllBtn : imp.importOneBtn}
+                </button>
+              )}
             </div>
 
             {/* Filter Tabs + Search */}
@@ -1204,7 +1192,7 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto thin-scrollbar divide-y divide-[#EDF2F8] px-5">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain thin-scrollbar divide-y divide-[#EDF2F8] px-5">
               {filteredFiles.length === 0 ? (
                 <div className="py-10 text-center text-xs text-[#94A3B8]">
                   {imp.emptyCardFiles}
@@ -1262,7 +1250,7 @@ export const ImportFilesSheet: React.FC<ImportFilesSheetProps> = ({
               )}
             </div>
 
-            <div className="p-4 border-t border-[#EDF2F8] bg-[#FAFBFD]">
+            <div className="shrink-0 p-4 border-t border-[#EDF2F8] bg-[#FAFBFD]">
               <button
                 type="button"
                 onClick={() => setMode('menu')}

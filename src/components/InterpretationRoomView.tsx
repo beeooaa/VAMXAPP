@@ -169,7 +169,8 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
       if (r.trashed) return false;
       const lc = getRoomLifecycle(r);
       if (lc !== 'reviewable' && lc !== 'published' && r.status !== 'ended') return false;
-      return getArchiveStatus(r) !== 'published';
+      const status = getArchiveStatus(r);
+      return status !== 'published' && status !== 'empty';
     }).length;
   }, [orgRooms]);
 
@@ -280,11 +281,13 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
     if (isDictating && target.id === currentLiveRoom?.id) stopDictation();
     const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const endedId = target.id;
-    const totalDur = Math.max(
+    const hasContent = (target.utterances || []).length > 0 ||
+      (target.originalSegments || []).length > 0 || (target.interpretedSegments || []).length > 0;
+    const totalDur = hasContent ? Math.max(
       45,
       target.durationSec ?? 0,
       ((target.utterances || []).slice(-1)[0]?.seconds ?? 0) + 15
-    );
+    ) : 0;
 
     onUpdateRoom({
       ...target,
@@ -297,7 +300,7 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
       originalSegments:
         (target.originalSegments || []).length > 0
           ? target.originalSegments
-          : [
+          : (target.utterances || []).length === 0 ? [] : [
               {
                 id: `${target.id}-os`,
                 startSec: 0,
@@ -308,7 +311,7 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
       interpretedSegments:
         (target.interpretedSegments || []).length > 0
           ? target.interpretedSegments
-          : [
+          : (target.utterances || []).length === 0 ? [] : [
               {
                 id: `${target.id}-is`,
                 startSec: 0,
@@ -860,25 +863,6 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
                             )}
 
                             <div className="flex items-center gap-2 shrink-0">
-                              {isHost && (() => {
-                                const closeKind = getRoomCloseKind(r);
-                                return (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setRoomActionConfirm({ room: r, kind: closeKind });
-                                    }}
-                                    className={`h-8 px-2.5 rounded-lg text-xs font-semibold cursor-pointer whitespace-nowrap ${
-                                      closeKind === 'cancel'
-                                        ? 'bg-[#F4F6FA] hover:bg-red-50 text-[#475569] hover:text-[#DC2626]'
-                                        : 'bg-red-50 hover:bg-red-100 text-[#DC2626]'
-                                    }`}
-                                  >
-                                    {closeKind === 'cancel' ? c.cancelRoomBtn : c.endMeetingBtn}
-                                  </button>
-                                );
-                              })()}
                               <span className="text-xs font-semibold text-[#1668FF] inline-flex items-center gap-0.5 whitespace-nowrap">
                                 <span>{c.enterRoomBtn}</span>
                                 <ChevronRight className="w-3.5 h-3.5" />
@@ -1398,7 +1382,7 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
                   value={activeOrgId}
                   onChange={(e) => handleSwitchOrg(e.target.value as 'org-a' | 'org-b')}
                   aria-label="Organization Switcher"
-                  className="h-8 px-2.5 rounded-lg border border-[#E5EAF3] text-xs bg-white text-[#334155] max-w-[165px] truncate cursor-pointer"
+                  className="vamx-select vamx-select--xs max-w-[165px]"
                 >
                   {INTERP_ORGS.map((org) => (
                     <option key={org.id} value={org.id}>
@@ -1413,7 +1397,7 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
                     setDefaultRouteId(e.target.value as 'route-asean' | 'route-global')
                   }
                   aria-label={c.globalRouteLabel}
-                  className="h-8 px-2.5 rounded-lg border border-[#E5EAF3] bg-white text-xs text-[#334155] max-w-[180px] truncate cursor-pointer"
+                  className="vamx-select vamx-select--xs max-w-[180px]"
                 >
                   {INTERP_ROUTES.map((rt) => (
                     <option key={rt.id} value={rt.id}>
@@ -1548,29 +1532,6 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
                               )}
                             </div>
                           </div>
-                          {isHost && (() => {
-                            const closeKind = getRoomCloseKind(r);
-                            const actionTitle =
-                              closeKind === 'cancel' ? c.cancelRoomBtn : c.endMeetingBtn;
-                            return (
-                              <button
-                                type="button"
-                                title={actionTitle}
-                                aria-label={`${actionTitle}: ${r.title}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setRoomActionConfirm({ room: r, kind: closeKind });
-                                }}
-                                className="w-6 h-6 rounded-md text-[#94A3B8] hover:text-[#DC2626] hover:bg-red-50 flex items-center justify-center shrink-0 cursor-pointer transition-colors"
-                              >
-                                {closeKind === 'cancel' ? (
-                                  <X className="w-3.5 h-3.5" />
-                                ) : (
-                                  <Square className="w-2.5 h-2.5 fill-current" />
-                                )}
-                              </button>
-                            );
-                          })()}
                         </div>
                       );
                     })}
@@ -1688,7 +1649,7 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
                 <select
                   value={roleView}
                   onChange={(e) => setRoleView(e.target.value as InterpRoleView)}
-                  className="w-full h-9 px-2.5 rounded-xl border border-[#DCE3EE] text-xs font-medium text-[#111827] bg-white focus:outline-none focus:border-[#1668FF]"
+                  className="vamx-select vamx-select--sm w-full"
                 >
                   {(['host', 'speaker', 'interpreter', 'standby', 'audience'] as InterpRoleView[]).map(
                     (rv) => (
@@ -2415,7 +2376,7 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
                 <select
                   value={activeOrgId}
                   onChange={(e) => handleSwitchOrg(e.target.value as 'org-a' | 'org-b')}
-                  className="w-full h-11 px-3 rounded-xl border border-[#DCE3EE] text-xs font-medium bg-white text-[#111827]"
+                  className="vamx-select vamx-select--lg w-full"
                 >
                   {INTERP_ORGS.map((org) => (
                     <option key={org.id} value={org.id}>
@@ -2434,7 +2395,7 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
                   onChange={(e) =>
                     setDefaultRouteId(e.target.value as 'route-asean' | 'route-global')
                   }
-                  className="w-full h-11 px-3 rounded-xl border border-[#DCE3EE] text-xs font-medium bg-white text-[#111827]"
+                  className="vamx-select vamx-select--lg w-full"
                 >
                   {INTERP_ROUTES.map((rt) => (
                     <option key={rt.id} value={rt.id}>
@@ -2579,25 +2540,25 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
                   }));
                   onNotify(nextOpen ? c.entryOpenState : c.entryLockedState);
                 }}
-                className={`w-full h-11 px-4 rounded-xl border text-xs font-semibold flex items-center justify-between cursor-pointer ${
+                className={`w-full h-11 px-4 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 cursor-pointer ${
                   currentLiveRoom.entryOpen === false
                     ? 'bg-red-50 border-red-200 text-[#DC2626]'
                     : 'bg-[#F5F7FB] border-[#DCE3EE] text-[#334155]'
                 }`}
               >
-                <span className="inline-flex items-center gap-2">
+                <span className="inline-flex min-w-0 items-center gap-2">
                   {currentLiveRoom.entryOpen === false ? (
                     <Lock className="w-4 h-4" />
                   ) : (
                     <Unlock className="w-4 h-4 text-[#16A34A]" />
                   )}
-                  <span>
+                  <span className="truncate">
                     {currentLiveRoom.entryOpen === false
                       ? c.entryLockedState
                       : c.entryOpenState}
                   </span>
                 </span>
-                <span className="text-[11px] opacity-80">
+                <span className="shrink-0 whitespace-nowrap text-[11px] opacity-80">
                   {currentLiveRoom.entryOpen === false ? c.reopenEntryBtn : c.closeEntryBtn}
                 </span>
               </button>
@@ -2803,25 +2764,25 @@ export const InterpretationRoomView: React.FC<InterpretationRoomViewProps> = ({
                         setShowMobileMoreSheet(false);
                         onNotify(nextOpen ? c.entryOpenState : c.entryLockedState);
                       }}
-                      className={`w-full h-11 px-3.5 rounded-xl border flex items-center justify-between text-xs font-semibold cursor-pointer ${
+                      className={`w-full h-11 px-3.5 rounded-xl border flex items-center justify-between gap-2 text-xs font-semibold cursor-pointer ${
                         currentLiveRoom.entryOpen === false
                           ? 'bg-red-50 border-red-200 text-[#DC2626]'
                           : 'bg-[#F5F7FB] border-[#DCE3EE] text-[#334155]'
                       }`}
                     >
-                      <span className="inline-flex items-center gap-2">
+                      <span className="inline-flex min-w-0 items-center gap-2">
                         {currentLiveRoom.entryOpen === false ? (
                           <Lock className="w-4 h-4" />
                         ) : (
                           <Unlock className="w-4 h-4 text-[#16A34A]" />
                         )}
-                        <span>
+                        <span className="truncate">
                           {currentLiveRoom.entryOpen === false
                             ? c.entryLockedState
                             : c.entryOpenState}
                         </span>
                       </span>
-                      <span className="text-[11px] opacity-80">
+                      <span className="shrink-0 whitespace-nowrap text-[11px] opacity-80">
                         {currentLiveRoom.entryOpen === false ? c.reopenEntryBtn : c.closeEntryBtn}
                       </span>
                     </button>

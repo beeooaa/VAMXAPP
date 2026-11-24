@@ -1,3 +1,4 @@
+import { archiveWorkflow } from './archiveWorkflow';
 import {
   AppLanguage,
   InterpAccessPolicy,
@@ -202,11 +203,10 @@ export function getArchiveStatus(
   if (lc === 'published' || room.minutes?.publishedLocked || room.archiveStatus === 'published') {
     return 'published';
   }
-  if (room.archiveStatus === 'completed' || room.minutes?.reviewedConfirmed) {
+  const workflow = archiveWorkflow(room);
+  if (workflow.empty) return 'empty';
+  if (workflow.canArchive) {
     return 'completed';
-  }
-  if (room.archiveStatus === 'processing' || Boolean(room.minutes)) {
-    return 'processing';
   }
   return 'reviewable';
 }
@@ -230,7 +230,7 @@ export function normalizeInterpretationRoom(room: InterpretationRoom): Interpret
   const utterances = room.utterances ?? [];
   const originalSegments =
     room.originalSegments ??
-    (durationSec > 0
+    (durationSec > 0 && utterances.length > 0
       ? [
           {
             id: `${room.id}-orig-1`,
@@ -242,7 +242,7 @@ export function normalizeInterpretationRoom(room: InterpretationRoom): Interpret
       : []);
   const interpretedSegments =
     room.interpretedSegments ??
-    (durationSec > 0
+    (durationSec > 0 && utterances.length > 0
       ? [
           {
             id: `${room.id}-int-1`,
@@ -1110,10 +1110,10 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     copyInviteBtn: '复制邀请',
     qrBtn: '二维码',
     closeEntryBtn: '锁定入场',
-    reopenEntryBtn: '解锁重开入场',
-    entryOpenState: '允许新入场',
-    entryLockedState: '已锁定新入场',
-    entryClosedTag: '入场已锁定（新访客禁止进入）',
+    reopenEntryBtn: '解锁入场',
+    entryOpenState: '可入场',
+    entryLockedState: '已锁定',
+    entryClosedTag: '新访客暂不可入场',
     roleViewTitle: '当前端内工作视角',
     roles: {
       host: '主持人',
@@ -1163,9 +1163,10 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
       published: '已归档',
     },
     archiveStatuses: {
+      empty: '无内容',
       reviewable: '待审核',
       processing: '处理中',
-      completed: '已完成',
+      completed: '待归档',
       published: '已归档',
     },
     sentenceStatuses: {
@@ -1176,7 +1177,7 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     },
     ttsBtn: '试听朗读',
     editBtn: '编辑',
-    saveEditBtn: '保存确认',
+    saveEditBtn: '保存译文',
     cancelBtn: '取消',
     retranslateBtn: '重译',
     retryBtn: '重试翻译',
@@ -1230,7 +1231,7 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     archiveBreadcrumb: '会议结束 → 查看记录 → 回放录音 → 检查原文与译文 → 生成纪要 → 确认并归档',
     archiveListTab: (n) => `归档列表 (${n})`,
     trashTab: (n) => `回收站 (${n})`,
-    searchArchivePlaceholder: '按会议名称或关键词搜索…',
+    searchArchivePlaceholder: '搜索会议…',
     allStatuses: '全部状态',
     allDates: '全部日期',
     dateToday: '今天',
@@ -1260,8 +1261,8 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     supplementGapBtn: '人工补录',
     markResolvedBtn: '标记已解决',
     resolvedTag: '缺段已解决',
-    filterAllUtterances: '全部段落',
-    filterAnomalies: '仅异常/待确认段落',
+    filterAllUtterances: '全部',
+    filterAnomalies: '待处理',
     confirmTextOkBtn: '确认文本无误',
     textConfirmedBadge: '文本已核对',
     generateMinutesBtn: '生成会议纪要',
@@ -1320,7 +1321,7 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     pricingTitle: 'VAMX 企业同传分钟数与版本定价',
     inviteUserTitle: '邀请组织成员与译员加入工作台',
     globalRouteLabel: '账号默认翻译线路',
-    lobbyTitle: '同传室',
+    lobbyTitle: '同声传译室',
     lobbyLiveTab: (n) => `进行中 (${n})`,
     enterRoomBtn: '进入控场',
     inviteSheetTitle: '入场码与席位管理',
@@ -1355,9 +1356,9 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     qrBtn: 'QR Code',
     closeEntryBtn: 'Lock Entry',
     reopenEntryBtn: 'Unlock Entry',
-    entryOpenState: 'Entry Open',
-    entryLockedState: 'Entry Locked',
-    entryClosedTag: 'Entry locked (new guests blocked)',
+    entryOpenState: 'Open',
+    entryLockedState: 'Locked',
+    entryClosedTag: 'New guests cannot enter',
     roleViewTitle: 'In-App Role Perspective',
     roles: {
       host: 'Host',
@@ -1407,6 +1408,7 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
       published: 'Archived',
     },
     archiveStatuses: {
+      empty: 'No content',
       reviewable: 'Pending Review',
       processing: 'Processing',
       completed: 'Completed',
@@ -1420,7 +1422,7 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     },
     ttsBtn: 'Speak',
     editBtn: 'Edit',
-    saveEditBtn: 'Save & Confirm',
+    saveEditBtn: 'Save translation',
     cancelBtn: 'Cancel',
     retranslateBtn: 'Retranslate',
     retryBtn: 'Retry',
@@ -1474,7 +1476,7 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     archiveBreadcrumb: 'Session Ended → Review → Dual-Track Playback → Proofread → Generate Minutes → Publish',
     archiveListTab: (n) => `Archives (${n})`,
     trashTab: (n) => `Trash (${n})`,
-    searchArchivePlaceholder: 'Search room title or transcript…',
+    searchArchivePlaceholder: 'Search meetings…',
     allStatuses: 'All Statuses',
     allDates: 'All Dates',
     dateToday: 'Today',
@@ -1504,8 +1506,8 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     supplementGapBtn: 'Fill Manually',
     markResolvedBtn: 'Mark Resolved',
     resolvedTag: 'Gap Resolved',
-    filterAllUtterances: 'All Segments',
-    filterAnomalies: 'Missing / Draft Only',
+    filterAllUtterances: 'All',
+    filterAnomalies: 'Needs review',
     confirmTextOkBtn: 'Confirm Transcript',
     textConfirmedBadge: 'Transcript Verified',
     generateMinutesBtn: 'Generate Minutes',
@@ -1598,10 +1600,10 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     copyInviteBtn: 'Sao chép mời',
     qrBtn: 'Mã QR',
     closeEntryBtn: 'Khóa cửa vào',
-    reopenEntryBtn: 'Mở khóa cửa vào',
-    entryOpenState: 'Đang mở cửa vào',
-    entryLockedState: 'Đã khóa cửa vào',
-    entryClosedTag: 'Đã khóa cửa vào (khách mới bị chặn)',
+    reopenEntryBtn: 'Mở cửa vào',
+    entryOpenState: 'Đang mở',
+    entryLockedState: 'Đã khóa',
+    entryClosedTag: 'Khách mới chưa thể vào',
     roleViewTitle: 'Vai trò trong ứng dụng',
     roles: {
       host: 'Chủ tọa',
@@ -1651,6 +1653,7 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
       published: 'Đã lưu trữ',
     },
     archiveStatuses: {
+      empty: 'Không có nội dung',
       reviewable: 'Chờ duyệt',
       processing: 'Đang xử lý',
       completed: 'Hoàn tất',
@@ -1664,7 +1667,7 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     },
     ttsBtn: 'Nghe đọc',
     editBtn: 'Sửa',
-    saveEditBtn: 'Lưu xác nhận',
+    saveEditBtn: 'Lưu bản dịch',
     cancelBtn: 'Hủy',
     retranslateBtn: 'Dịch lại',
     retryBtn: 'Thử lại',
@@ -1718,7 +1721,7 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     archiveBreadcrumb: 'Kết thúc → Xem lại → Nghe 2 kênh → Rà soát → Tạo biên bản → Xuất bản',
     archiveListTab: (n) => `Danh sách (${n})`,
     trashTab: (n) => `Thùng rác (${n})`,
-    searchArchivePlaceholder: 'Tìm tên cuộc họp hoặc từ khóa…',
+    searchArchivePlaceholder: 'Tìm cuộc họp…',
     allStatuses: 'Mọi trạng thái',
     allDates: 'Mọi ngày',
     dateToday: 'Hôm nay',
@@ -1748,8 +1751,8 @@ export const INTERP_COPY: Record<AppLanguage, InterpCopy> = {
     supplementGapBtn: 'Bổ sung thủ công',
     markResolvedBtn: 'Đánh dấu đã xử lý',
     resolvedTag: 'Đã xử lý',
-    filterAllUtterances: 'Tất cả đoạn',
-    filterAnomalies: 'Chỉ đoạn lỗi / nháp',
+    filterAllUtterances: 'Tất cả',
+    filterAnomalies: 'Cần xử lý',
     confirmTextOkBtn: 'Xác nhận văn bản',
     textConfirmedBadge: 'Đã xác nhận',
     generateMinutesBtn: 'Tạo biên bản họp',

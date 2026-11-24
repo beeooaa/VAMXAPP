@@ -352,6 +352,11 @@ export interface UiStrings {
     displayNamePlaceholder: string;
     emailLabel: string;
     phoneLabel: string;
+    uploadAvatarBtn: string;
+    removeAvatarBtn: string;
+    avatarFileHint: string;
+    avatarInvalidFile: string;
+    avatarTooLarge: string;
     saveProfileBtn: string;
     toastProfileEmpty: string;
     toastProfileSaved: string;
@@ -480,6 +485,7 @@ export interface UiStrings {
     summaryHeader: string;
     summaryTemplateSelectAria: string;
     summaryLangSelectAria: string;
+    summaryAutoLanguageLabel: string;
     regenerateBtn: string;
     generatingBtn: string;
     emptySummaryTitle: string;
@@ -1208,6 +1214,11 @@ export const UI_STRINGS: Record<AppLanguage, UiStrings> = {
       displayNamePlaceholder: '输入你的显示昵称',
       emailLabel: '绑定邮箱',
       phoneLabel: '绑定手机',
+      uploadAvatarBtn: '上传头像',
+      removeAvatarBtn: '移除头像',
+      avatarFileHint: '支持 JPG、PNG、WebP，图片会裁成方形',
+      avatarInvalidFile: '请选择 JPG、PNG 或 WebP 图片',
+      avatarTooLarge: '图片不能超过 8 MB',
       saveProfileBtn: '保存资料',
       toastProfileEmpty: '昵称不能为空',
       toastProfileSaved: '个人资料已更新',
@@ -1330,10 +1341,11 @@ export const UI_STRINGS: Record<AppLanguage, UiStrings> = {
       summaryHeader: 'AI 结构化总结',
       summaryTemplateSelectAria: '选择总结模板',
       summaryLangSelectAria: '选择总结语言',
+      summaryAutoLanguageLabel: '自动语言',
       regenerateBtn: '重新生成',
       generatingBtn: '生成中…',
       emptySummaryTitle: '尚未生成 AI 总结',
-      emptySummaryDesc: '选择模板与输出语言，一键提炼核心洞察与待办行动',
+      emptySummaryDesc: '一键提炼核心洞察与待办行动',
       generateSummaryBtn: '立即生成总结',
       sectionOverview: '核心摘要',
       sectionKeyPoints: '关键要点',
@@ -2061,6 +2073,11 @@ export const UI_STRINGS: Record<AppLanguage, UiStrings> = {
       displayNamePlaceholder: 'Enter display name',
       emailLabel: 'Email',
       phoneLabel: 'Phone',
+      uploadAvatarBtn: 'Upload photo',
+      removeAvatarBtn: 'Remove photo',
+      avatarFileHint: 'JPG, PNG or WebP · cropped to a square',
+      avatarInvalidFile: 'Choose a JPG, PNG or WebP image',
+      avatarTooLarge: 'Image must be under 8 MB',
       saveProfileBtn: 'Save Profile',
       toastProfileEmpty: 'Display name cannot be empty',
       toastProfileSaved: 'Profile updated',
@@ -2183,10 +2200,11 @@ export const UI_STRINGS: Record<AppLanguage, UiStrings> = {
       summaryHeader: 'AI Structured Summary',
       summaryTemplateSelectAria: 'Select summary template',
       summaryLangSelectAria: 'Select summary language',
+      summaryAutoLanguageLabel: 'Auto',
       regenerateBtn: 'Regenerate',
       generatingBtn: 'Generating…',
       emptySummaryTitle: 'No AI summary yet',
-      emptySummaryDesc: 'Pick a template and language to extract key insights and action items',
+      emptySummaryDesc: 'Extract key insights and action items in one tap',
       generateSummaryBtn: 'Generate Summary',
       sectionOverview: 'Overview',
       sectionKeyPoints: 'Key Points',
@@ -2914,6 +2932,11 @@ export const UI_STRINGS: Record<AppLanguage, UiStrings> = {
       displayNamePlaceholder: 'Nhập tên hiển thị',
       emailLabel: 'Email liên kết',
       phoneLabel: 'Số điện thoại',
+      uploadAvatarBtn: 'Tải ảnh đại diện',
+      removeAvatarBtn: 'Xóa ảnh',
+      avatarFileHint: 'JPG, PNG hoặc WebP · cắt thành hình vuông',
+      avatarInvalidFile: 'Chọn ảnh JPG, PNG hoặc WebP',
+      avatarTooLarge: 'Ảnh phải nhỏ hơn 8 MB',
       saveProfileBtn: 'Lưu hồ sơ',
       toastProfileEmpty: 'Tên hiển thị không được để trống',
       toastProfileSaved: 'Đã cập nhật hồ sơ',
@@ -3036,10 +3059,11 @@ export const UI_STRINGS: Record<AppLanguage, UiStrings> = {
       summaryHeader: 'Tóm tắt AI có cấu trúc',
       summaryTemplateSelectAria: 'Chọn mẫu tóm tắt',
       summaryLangSelectAria: 'Chọn ngôn ngữ tóm tắt',
+      summaryAutoLanguageLabel: 'Tự động',
       regenerateBtn: 'Tạo lại',
       generatingBtn: 'Đang tạo…',
       emptySummaryTitle: 'Chưa có tóm tắt AI',
-      emptySummaryDesc: 'Chọn mẫu và ngôn ngữ đầu ra để trích xuất ý chính & việc cần làm',
+      emptySummaryDesc: 'Trích xuất ý chính và việc cần làm chỉ với một lần nhấn',
       generateSummaryBtn: 'Tạo tóm tắt ngay',
       sectionOverview: 'Tổng quan',
       sectionKeyPoints: 'Điểm chính',

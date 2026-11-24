@@ -321,7 +321,7 @@ export const AiWorkbenchView: React.FC<AiWorkbenchViewProps> = ({
               aria-label={ai.scopeAria}
               value={scopeId}
               onChange={(e) => setScopeId(e.target.value)}
-              className="bg-transparent text-xs font-medium focus:outline-none cursor-pointer"
+              className="vamx-select vamx-select--xs vamx-select--inline"
             >
               {folders.map((f) => (
                 <option key={f.id} value={f.id}>

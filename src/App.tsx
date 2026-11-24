@@ -1633,7 +1633,7 @@ export default function App() {
                     aria-label={ui.files.headerProfileAria}
                     className="w-11 h-11 rounded-full hover:bg-[#F3F6FC] flex items-center justify-center text-[#111827] transition-colors cursor-pointer"
                   >
-                    <User className="w-[18px] h-[18px]" />
+                    {userProfile.avatarDataUrl ? <img src={userProfile.avatarDataUrl} alt="" className="h-7 w-7 rounded-full object-cover" /> : <User className="w-[18px] h-[18px]" />}
                   </button>
                 </div>
               </>
@@ -2151,6 +2151,7 @@ export default function App() {
                       <RecordingDetailView
                         recording={selectedRecording}
                         templates={templates}
+                        defaultTemplateId={automation.defaultTemplateId}
                         folders={folders}
                         language={language}
                         seekTarget={seekTarget}

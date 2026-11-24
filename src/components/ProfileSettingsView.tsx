@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -130,7 +130,46 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
     userName: userProfile.userName,
     userEmail: userProfile.userEmail,
     userPhone: userProfile.userPhone,
+    avatarDataUrl: userProfile.avatarDataUrl,
   });
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarFile = (file: File | undefined) => {
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      onNotify(pr.avatarInvalidFile);
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      onNotify(pr.avatarTooLarge);
+      return;
+    }
+    const imageUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const context = canvas.getContext('2d');
+      if (context) {
+        const side = Math.min(image.naturalWidth, image.naturalHeight);
+        const left = (image.naturalWidth - side) / 2;
+        const top = (image.naturalHeight - side) / 2;
+        context.fillStyle = '#FFFFFF';
+        context.fillRect(0, 0, 256, 256);
+        context.drawImage(image, left, top, side, side, 0, 0, 256, 256);
+        setProfileDraft(draft => ({ ...draft, avatarDataUrl: canvas.toDataURL('image/jpeg', 0.84) }));
+      } else {
+        onNotify(pr.avatarInvalidFile);
+      }
+      URL.revokeObjectURL(imageUrl);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(imageUrl);
+      onNotify(pr.avatarInvalidFile);
+    };
+    image.src = imageUrl;
+  };
 
   const [showCreateTpl, setShowCreateTpl] = useState(false);
   const [tplName, setTplName] = useState('');
@@ -193,14 +232,15 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
             userName: userProfile.userName,
             userEmail: userProfile.userEmail,
             userPhone: userProfile.userPhone,
+            avatarDataUrl: userProfile.avatarDataUrl,
           });
           onSetActiveSheet('profile');
         }}
         className="w-full text-left bg-white rounded-2xl border border-zinc-200/80 p-4 sm:p-5 flex items-center justify-between gap-4 hover:border-zinc-300 transition-colors cursor-pointer"
       >
         <div className="flex items-center gap-3.5 min-w-0">
-          <div className="w-12 h-12 rounded-2xl bg-[#EEF3FF] text-[#1668FF] font-display font-bold text-lg flex items-center justify-center shrink-0">
-            {(userProfile.userName || 'M').slice(0, 1).toUpperCase()}
+          <div className="w-12 h-12 rounded-2xl bg-[#EEF3FF] text-[#1668FF] font-display font-bold text-lg flex items-center justify-center shrink-0 overflow-hidden">
+            {userProfile.avatarDataUrl ? <img src={userProfile.avatarDataUrl} alt="" className="h-full w-full object-cover" /> : (userProfile.userName || 'M').slice(0, 1).toUpperCase()}
           </div>
           <div className="min-w-0">
             <div className="text-base font-display font-bold text-[#111113] truncate">
@@ -351,7 +391,7 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
               aria-label={pr.uiLanguageAria}
               value={language}
               onChange={(e) => onChangeLanguage(e.target.value as AppLanguage)}
-              className="text-xs font-medium text-zinc-600 bg-transparent focus:outline-none cursor-pointer text-right"
+              className="vamx-select vamx-select--sm vamx-select--inline max-w-[54%] text-right"
             >
               <option value="zh">简体中文</option>
               <option value="en">English</option>
@@ -371,7 +411,7 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
                 onChangeTranscriptionLang(e.target.value);
                 onNotify(pr.transcribeLangToast(getLanguageOptionLabel(e.target.value, language)));
               }}
-              className="text-xs font-medium text-zinc-600 bg-transparent focus:outline-none cursor-pointer text-right"
+              className="vamx-select vamx-select--sm vamx-select--inline max-w-[54%] text-right"
             >
               {TRANSCRIPTION_LANGUAGES.map((l) => (
                 <option key={l} value={l}>
@@ -561,7 +601,7 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
                 onChange={(e) =>
                   onUpdateAutomation({ ...automation, defaultTemplateId: e.target.value })
                 }
-                className="text-xs font-medium text-zinc-600 bg-zinc-100 px-3 py-1.5 rounded-lg focus:outline-none cursor-pointer"
+                className="vamx-select vamx-select--sm max-w-[54%]"
               >
                 {templates.map((tpl) => (
                   <option key={tpl.id} value={tpl.id}>
@@ -1118,12 +1158,26 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
                 userName: profileDraft.userName.trim(),
                 userEmail: profileDraft.userEmail.trim() || p.userEmail,
                 userPhone: profileDraft.userPhone.trim() || p.userPhone,
+                avatarDataUrl: profileDraft.avatarDataUrl,
               }));
               onSetActiveSheet(null);
               onNotify(pr.toastProfileSaved);
             }}
             className="space-y-3.5"
           >
+            <div className="flex items-center gap-4 pb-1">
+              <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl bg-[#EEF3FF] text-[#1668FF] font-display text-xl font-bold flex items-center justify-center">
+                {profileDraft.avatarDataUrl ? <img src={profileDraft.avatarDataUrl} alt="" className="h-full w-full object-cover" /> : (profileDraft.userName || 'M').slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0 space-y-1.5">
+                <input ref={avatarFileInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={event => { handleAvatarFile(event.target.files?.[0]); event.target.value = ''; }} />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => avatarFileInputRef.current?.click()} className="h-8 rounded-lg border border-[#DCE3EE] bg-white px-3 text-xs font-semibold text-[#1668FF] cursor-pointer">{pr.uploadAvatarBtn}</button>
+                  {profileDraft.avatarDataUrl && <button type="button" onClick={() => setProfileDraft(draft => ({ ...draft, avatarDataUrl: undefined }))} className="text-xs text-[#64748B] cursor-pointer">{pr.removeAvatarBtn}</button>}
+                </div>
+                <p className="text-[11px] leading-4 text-[#94A3B8]">{pr.avatarFileHint}</p>
+              </div>
+            </div>
             <div>
               <label className="block text-xs font-medium text-zinc-500 mb-1">{pr.displayNameLabel}</label>
               <input

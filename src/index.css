@@ -22,6 +22,39 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Shared native select treatment across recording, archive, room and settings views. */
+.vamx-select {
+  appearance: none;
+  min-width: 0;
+  height: 40px;
+  padding: 0 34px 0 12px;
+  border: 1px solid #DCE3EE;
+  border-radius: 12px;
+  background-color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 15px;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+}
+.vamx-select:hover { border-color: #B9C9E2; }
+.vamx-select:focus-visible {
+  outline: none;
+  border-color: #1668FF;
+  box-shadow: 0 0 0 3px rgba(22, 104, 255, 0.12);
+}
+.vamx-select:disabled { cursor: not-allowed; opacity: 0.55; }
+.vamx-select--sm { height: 36px; border-radius: 10px; }
+.vamx-select--xs { height: 32px; border-radius: 8px; padding-left: 10px; }
+.vamx-select--lg { height: 44px; }
+.vamx-select--soft { background-color: #F4F7FC; border-color: #E5ECF5; }
+.vamx-select--inline { background-color: transparent; border-color: transparent; color: inherit; }
+
 /* Hide scrollbars cleanly for horizontal tab strips */
 .no-scrollbar::-webkit-scrollbar {
   display: none;

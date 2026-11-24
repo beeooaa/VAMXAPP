@@ -123,7 +123,7 @@ export const RealTimeTranslationView: React.FC<RealTimeTranslationViewProps> = (
                 aria-label={tr.sourceLangAria}
                 value={sourceLang}
                 onChange={(e) => onChangeSourceLang(e.target.value)}
-                className="bg-transparent px-1 py-1 focus:outline-none cursor-pointer"
+                className="vamx-select vamx-select--xs vamx-select--inline"
               >
                 <option value="中文">{getLanguageOptionLabel('中文', language)}</option>
                 <option value="英语">{getLanguageOptionLabel('英语', language)}</option>
@@ -141,7 +141,7 @@ export const RealTimeTranslationView: React.FC<RealTimeTranslationViewProps> = (
                 aria-label={tr.targetLangAria}
                 value={targetLang}
                 onChange={(e) => onChangeTargetLang(e.target.value)}
-                className="bg-transparent px-1 py-1 focus:outline-none cursor-pointer"
+                className="vamx-select vamx-select--xs vamx-select--inline"
               >
                 <option value="英语">{getLanguageOptionLabel('英语', language)}</option>
                 <option value="中文">{getLanguageOptionLabel('中文', language)}</option>
