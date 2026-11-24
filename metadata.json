@@ -1,0 +1,6 @@
+{
+  "name": "VAMX — 智能声学与 AI 纪要工作台",
+  "description": "极简现代的智能录音卡伴侣与 AI 语音工作台：实时转写、多语种同传、结构化纪要与跨库问答。",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
